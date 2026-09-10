@@ -157,3 +157,38 @@ test('every duration 1–8 sums morning and ordinary hours, with snapshot segmen
   assert.deepEqual(Array.from(saved.priceSnapshot.segments,s => s.totalPrice),[1000,2400]);
   assert.equal((await API.getMyBookings())[0].price,3400);
 });
+
+
+test('other services select 2–8 hours without multiplying fixed/minimum prices', async()=>{
+ const {API,B}=setup();
+ for(const id of ['recording-mix','studio-mixing','studio-beatmaking','studio-mix-master']) {
+  const service=await API.getService(id); assert.equal(service.minDurationHours,2);
+  await assert.rejects(API.createBooking({serviceId:id,durationHours:1}),/Минимальная/);
+  if(id==='recording-mix') continue;
+  for(const duration of [2,5,8]) {assert.equal(B.durationFor(service,duration),duration);assert.equal(B.priceFor(service,duration),service.price);}
+  let date=B.addDays(B.today(),1);while(!(await API.getAvailableSlots(date,2,id)).length)date=B.addDays(date,1);
+  const saved=await API.createBooking({serviceId:id,durationHours:2,date,startTime:(await API.getAvailableSlots(date,2,id))[0],client:{name:'Тест',phone:'79991234567'}});
+  assert.equal(saved.price,service.price);assert.equal(saved.durationHours,2);
+ }
+});
+test('rental packages prices, fixed starts, next-day conflicts and occupancy',async()=>{
+ const {API,B,storage}=setup();
+ const day=await API.getService('rental-day'), night=await API.getService('rental-night');
+ assert.equal(B.priceFor(day),9000);assert.equal(B.priceFor(night),7500);
+ assert.equal(day.fixedStart,'10:00');assert.equal(night.fixedStart,'22:00');
+ assert.equal(B.durationFor(night,1),12);assert.equal(B.endTime('22:00',12),'10:00 следующего дня');
+ let date=B.addDays(B.today(),1);while(!(await API.getAvailableSlots(date,12,night.id)).length)date=B.addDays(date,1);
+ assert.equal((await API.getAvailableSlots(date,12,day.id)).length,0); // Existing daytime busy interval.
+ const next=B.addDays(date,1);
+ const row={id:'conflict',clientId:'krug-mock-client',date:next,startTime:'09:00',durationHours:1,status:'request'};
+ storage.set('krug_mini_app_bookings_v1',JSON.stringify([row]));
+ assert.equal((await API.getAvailableSlots(date,12,night.id)).length,0);
+ row.startTime='10:00';storage.set('krug_mini_app_bookings_v1',JSON.stringify([row]));
+ assert.equal((await API.getAvailableSlots(date,12,night.id))[0],'22:00');
+ storage.delete('krug_mini_app_bookings_v1');
+ const saved=await API.createBooking({serviceId:night.id,durationHours:1,date,startTime:'22:00',price:1,client:{name:'Тест',phone:'79991234567'}});
+ assert.equal(saved.price,7500);assert.equal(saved.durationHours,12);
+ assert.equal((await API.getAvailableSlots(next,1,'rental')).includes('09:00'),false);
+ assert.equal((await API.getAvailableSlots(next,1,'rental')).includes('10:00'),true);
+ await assert.rejects(API.createBooking({serviceId:day.id,date,startTime:'11:00'}),/фиксировано/);
+});

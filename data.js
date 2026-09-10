@@ -7,9 +7,23 @@ window.KrugData = (() => {
   const services = [
     { id: 'recording', name: 'Запись', description: 'Запись звука в студии. Запись со сведением — отдельная услуга.', pricingType: 'hourly', priceTiers: tiers([1200,2400,3600,4800,6000,7200,8400,9600]), active: true },
     { id: 'morning', name: 'Запись утром', description: 'Запись по отдельной утренней цене. Начало только до 12:00.', pricingType: 'hourly', priceTiers: tiers([1000,null,2800,3600,4400,5200,6000,6800]), latestStartHour: 11, active: true },
-    { id: 'recording-mix', name: 'Запись + сведение', description: 'Запись звука и сведение в одном формате.', pricingType: 'hourly', priceTiers: tiers([1800,3600,4800,6000,7200,8400,9600,10800]), active: true },
+    { id: 'recording-mix', minDurationHours: 2, name: 'Запись + сведение', description: 'Запись звука и сведение в одном формате.', pricingType: 'hourly', priceTiers: tiers([1800,3600,4800,6000,7200,8400,9600,10800]), active: true },
     { id: 'rental', name: 'Аренда', description: 'Студия для твоей самостоятельной работы', pricingType: 'hourly', priceTiers: tiers([1000,null,2800,3600,4400,5100,5800,6500]), active: true }
   ];
+  for (const service of services) Object.assign(service, { publicVisible: service.id !== 'morning', publicCategory: 'primary', publicName: service.name, publicDescription: service.description, price: null, duration: null, defaultDuration: null });
+  // Values from CRM migrationServiceCatalog; minimum prices remain estimates.
+  services.push(...[
+    ['studio-mixing', 'Сведение на студии', 4000, 2, 'minimum'],
+    ['studio-beatmaking', 'Написание бита на студии', 5000, 1, 'minimum'],
+    ['studio-mix-master', 'Сведение + мастер на студии', 3000, null, 'fixed']
+  ].map(([id,name,price,duration,pricingType]) => ({id,name,publicName:name,description:'Работа в студии КРУГ.',publicDescription:'Работа в студии КРУГ.',price,pricingType,duration,defaultDuration:duration,defaultDurationHours:duration,active:true,publicVisible:true,publicCategory:'other'})));
+  for (const service of services.filter(s => s.publicCategory === 'other')) Object.assign(service, {minDurationHours:2,selectDuration:true,defaultDurationHours:null,defaultDuration:null,duration:null});
+  const rentalPackages = [
+    {id:'rental-day',name:'Аренда · 12 часов · День',price:9000,fixedStart:'10:00'},
+    {id:'rental-night',name:'Аренда · 12 часов · Ночь',price:7500,fixedStart:'22:00'}
+  ].map(s=>({...s,pricingType:'fixed',defaultDurationHours:12,active:true,publicVisible:false,isRentalPackage:true}));
+  services.push(...rentalPackages);
+  services.find(s=>s.id==='rental').packages = rentalPackages;
   // Retain the legacy service for existing records; expose only one recording choice.
   services.find(s => s.id === 'recording').morningPricing = {
     startMinute: 9 * 60, endMinute: 15 * 60,
@@ -27,7 +41,7 @@ window.KrugData = (() => {
       throw new Error('Не удалось открыть твои записи. Попробуй ещё раз. Сохранённые заявки не изменены.');
     }
   }
-  const getServices = async () => structuredClone(services.filter(s => s.active && s.id !== 'morning'));
+  const getServices = async () => structuredClone(services.filter(s => s.active && s.publicVisible));
   async function getService(id) {
     const service = services.find(s => s.id === id && s.active);
     if (!service) throw new Error('Эта услуга сейчас недоступна. Выбери другую.');
@@ -39,11 +53,26 @@ window.KrugData = (() => {
     // One studio, shared busy intervals. Sundays are closed in this mock.
     const busy = day % 2 === 0 ? [{ start: 13 * 60, end: 15 * 60 }] : [{ start: 17 * 60, end: 19 * 60 }];
     for (const booking of readBookings()) {
-      if (booking.date === date && booking.status !== 'cancelled') busy.push({ start: B.toMinutes(booking.startTime), end: B.toMinutes(booking.startTime) + booking.durationHours * 60 });
+      if (booking.status === 'cancelled') continue;
+      const offset = (Date.parse(booking.date+'T00:00:00Z')-Date.parse(date+'T00:00:00Z'))/60000;
+      const start = offset+B.toMinutes(booking.startTime), end=start+booking.durationHours*60;
+      if (start < 1440 && end > 0) busy.push({start:Math.max(0,start),end:Math.min(1440,end)});
     }
     return { date, open: 9 * 60, close: 23 * 60, closed: day === 0, busy };
   }
   async function getAvailableSlots(date, durationHours, serviceId) {
+    const selected = serviceId ? await getService(serviceId) : null;
+    if (selected?.isRentalPackage) {
+      if (durationHours !== 12 || new Date(date+'T'+selected.fixedStart+':00+03:00') <= new Date()) return [];
+      const start=B.toMinutes(selected.fixedStart), end=start+720;
+      for (let offset=0; offset<=Math.floor((end-1)/1440); offset++) {
+        const day=await getAvailability(B.addDays(date,offset));
+        const from=Math.max(0,start-offset*1440), to=Math.min(1440,end-offset*1440);
+        if(day.closed || day.busy.some(b=>from<b.end && to>b.start)) return [];
+      }
+      return [selected.fixedStart];
+    }
+    if (selected?.minDurationHours && durationHours < selected.minDurationHours) return [];
     let slots = B.availableSlots(await getAvailability(date), durationHours);
     if (serviceId) {
       const service = await getService(serviceId);
@@ -60,7 +89,10 @@ window.KrugData = (() => {
       if (existing) return structuredClone(existing);
       const service = await getService(data.serviceId);
       const durationHours = B.durationFor(service, data.durationHours);
-      const priceSnapshot = { ...B.quoteFor(service, durationHours, data.startTime), serviceId: service.id, date: data.date };
+      if (service.isRentalPackage && data.startTime !== service.fixedStart) throw new Error('Время пакета фиксировано.');
+      if (service.minDurationHours && durationHours < service.minDurationHours) throw new Error('Минимальная длительность этой услуги — 2 часа.');
+      if (!Number.isFinite(durationHours) || durationHours <= 0) throw new Error('Длительность уточняется. Онлайн-запись пока недоступна.');
+      const priceSnapshot = { ...B.quoteFor(service, durationHours, data.startTime), serviceId: service.id, date: data.date, pricingType: service.pricingType, isEstimate: service.pricingType === 'minimum' };
       const price = priceSnapshot.totalPrice;
       const client = { name: String(data.client?.name || '').trim(), phone: String(data.client?.phone || '').trim(), telegram: String(data.client?.telegram || '').trim() };
       const fields = B.validateClient(client);
