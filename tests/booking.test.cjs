@@ -57,11 +57,12 @@ test('creation recalculates price, persists, prevents duplicate and overlap, fil
 test('morning restriction and storage write failure are explicit', async () => {
   const { B, API, context } = setup();
   let date = B.addDays(B.today(), 1);
-  while (!(await API.getAvailableSlots(date, 1, 'morning')).length) date = B.addDays(date, 1);
-  const slots = await API.getAvailableSlots(date, 1, 'morning');
-  assert.ok(slots.every(s => Number(s.slice(0, 2)) <= 11));
+  while (!(await API.getAvailableSlots(date, 1, 'recording')).length) date = B.addDays(date, 1);
+  const slots = await API.getAvailableSlots(date, 1, 'recording');
+  assert.equal((await API.getAvailableSlots(date,1,'morning')).length,0);
+  await assert.rejects(API.createBooking({serviceId:'morning'}),/Архивная/);
   context.localStorage.setItem = () => { throw new Error('quota'); };
-  await assert.rejects(API.createBooking({ serviceId: 'morning', durationHours: 1, date, startTime: slots[0], client: { name: 'Тест', phone: '79999999999', telegram: '@tester' } }), /Не удалось сохранить/);
+  await assert.rejects(API.createBooking({ serviceId: 'recording', durationHours: 1, date, startTime: slots[0], client: { name: 'Тест', phone: '79999999999', telegram: '@tester' } }), /Не удалось сохранить/);
 });
 test('service clears dependencies; duration retains only a still available date', async () => {
   const { B, API } = setup();
@@ -178,7 +179,8 @@ test('rental packages prices, fixed starts, next-day conflicts and occupancy',as
  assert.equal(day.fixedStart,'10:00');assert.equal(night.fixedStart,'22:00');
  assert.equal(B.durationFor(night,1),12);assert.equal(B.endTime('22:00',12),'10:00 следующего дня');
  let date=B.addDays(B.today(),1);while(!(await API.getAvailableSlots(date,12,night.id)).length)date=B.addDays(date,1);
- assert.equal((await API.getAvailableSlots(date,12,day.id)).length,0); // Existing daytime busy interval.
+ let occupied=B.addDays(B.today(),1);while(!(await API.getAvailability(occupied)).busy.length)occupied=B.addDays(occupied,1);
+ assert.equal((await API.getAvailableSlots(occupied,12,day.id)).length,0);
  const next=B.addDays(date,1);
  const row={id:'conflict',clientId:'krug-mock-client',date:next,startTime:'09:00',durationHours:1,status:'request'};
  storage.set('krug_mini_app_bookings_v1',JSON.stringify([row]));
@@ -191,4 +193,13 @@ test('rental packages prices, fixed starts, next-day conflicts and occupancy',as
  assert.equal((await API.getAvailableSlots(next,1,'rental')).includes('09:00'),false);
  assert.equal((await API.getAvailableSlots(next,1,'rental')).includes('10:00'),true);
  await assert.rejects(API.createBooking({serviceId:day.id,date,startTime:'11:00'}),/фиксировано/);
+});
+
+test('demo horizon has multiple full rental dates while saved conflicts stay enforced',async()=>{
+ const {API,B,storage}=setup();let dayDates=[],nightDates=[];
+ for(let i=1;i<21;i++){const d=B.addDays(B.today(),i);if((await API.getAvailableSlots(d,12,'rental-day')).length)dayDates.push(d);if((await API.getAvailableSlots(d,12,'rental-night')).length)nightDates.push(d);}
+ assert.ok(dayDates.length>=3);assert.ok(nightDates.length>=3);
+ const date=dayDates[0];storage.set('krug_mini_app_bookings_v1',JSON.stringify([{id:'busy',clientId:'krug-mock-client',date,startTime:'15:00',durationHours:1,status:'request'}]));
+ assert.equal((await API.getAvailableSlots(date,12,'rental-day')).length,0);
+ assert.equal((await API.getService('morning')).legacyOnly,true);
 });

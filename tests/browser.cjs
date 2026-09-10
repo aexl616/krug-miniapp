@@ -304,12 +304,26 @@ const server = http.createServer((req, res) => {
         await p.getByRole('heading',{name:'Прочие услуги',exact:true}).waitFor();
       }
       p.once('dialog',d=>d.accept());
+      assert.doesNotMatch(await p.locator('[data-service-quick="studio-mix-master"] b').innerText(), /от/);
+      assert.match(await p.locator('[data-service-quick="studio-mixing"] b').innerText(), /от/);
       await p.locator('[data-service-quick="studio-mix-master"]').click();
       await p.getByRole('heading',{name:'Сколько времени?'}).waitFor();
       assert.equal(await p.locator('[data-duration="1"]').count(),0);
       assert.equal(await p.locator('[data-date], [data-time]').count(),0);
       assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      await p.locator('[data-duration="2"]').click();
+      assert.doesNotMatch(await p.locator('.dock-summary').innerText(),/от /);
+      await p.locator('[data-action="next"]').click();
+      await p.locator('[data-date]').first().click();
+      await p.locator('[data-action="next"]').click();
+      await p.locator('[data-time]').first().click();
+      await p.locator('[data-action="next"]').click();
+      assert.match(await p.locator('.summary-total').innerText(),/Итого/);
+      assert.doesNotMatch(await p.locator('.summary-total').innerText(),/от/);
       await p.screenshot({path:path.join(output,'krug-other-'+width+'.png')});
+      await p.locator('[data-action="back"]').click();
+      await p.locator('[data-action="back"]').click();
+      await p.locator('[data-action="back"]').click();
       await p.locator('[data-action="back"]').click();
       await p.getByRole('heading',{name:'Прочие услуги',exact:true}).waitFor();
       await ctx.close();
@@ -320,12 +334,6 @@ const server = http.createServer((req, res) => {
     for(const [width,height] of [[360,800],[390,844],[430,932]]) {
       for(const kind of ['day','night']) {
         const ctx=await browser.newContext({viewport:{width,height}}), p=await ctx.newPage();
-        // Empty studio fixture lets us verify Day booking without changing real mock occupancy.
-        if(kind==='day') await p.route('**/data.js',async route=>{
-          const response=await route.fetch();let source=await response.text();
-          source=source.replace(/const busy = day % 2[^;]+;/,'const busy = [];');
-          await route.fulfill({response,body:source});
-        });
         await p.goto(url);await p.locator('[data-service-quick="rental"]').click();
         await p.getByRole('heading',{name:'Выбери формат аренды'}).waitFor();
         await p.screenshot({path:path.join(output,'rental-formats-'+width+'.png')});

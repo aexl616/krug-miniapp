@@ -37,14 +37,14 @@
     if (bookingDraft.serviceId !== id) { B.changeService(bookingDraft, service); dateLimit = 8; flowMessage = ''; }
   }
   function footer(label, enabled = true) {
-    return `<div class="dock"><div class="dock-summary"><span>${escape(current()?.name || 'Выбери свой звук')}${bookingDraft.durationHours ? ` · ${hours(bookingDraft.durationHours)}` : ''}${pricingHint() ? `<br>${pricingHint()}` : ''}</span><strong>${bookingDraft.price === null ? 'КРУГ' : (current()?.publicCategory === 'other' ? 'от ' : '') + money(bookingDraft.price)}</strong></div>${button(`${label} <span aria-hidden="true">↗</span>`, 'next', 'primary', !enabled)}</div>`;
+    return `<div class="dock"><div class="dock-summary"><span>${escape(current()?.name || 'Выбери свой звук')}${bookingDraft.durationHours ? ` · ${hours(bookingDraft.durationHours)}` : ''}${pricingHint() ? `<br>${pricingHint()}` : ''}</span><strong>${bookingDraft.price === null ? 'КРУГ' : (current()?.pricingType === 'minimum' ? 'от ' : '') + money(bookingDraft.price)}</strong></div>${button(`${label} <span aria-hidden="true">↗</span>`, 'next', 'primary', !enabled)}</div>`;
   }
   function refreshPrice() {
     if (current() && bookingDraft.durationHours) bookingDraft.price = B.quoteFor(current(), bookingDraft.durationHours, bookingDraft.startTime).totalPrice;
   }
   function pricingHint() {
     const service = current();
-    if (service?.publicCategory === 'other') return 'Предварительная цена от ' + money(service.price) + '. Итог уточняется в студии.';
+    if (service?.pricingType === 'minimum') return 'Предварительная цена от ' + money(service.price) + '. Итог уточняется в студии.';
     if (!service?.morningPricing || !bookingDraft.durationHours) return '';
     if (!bookingDraft.startTime) return 'Цена уточнится после выбора времени';
     const quote = B.quoteFor(service, bookingDraft.durationHours, bookingDraft.startTime);
@@ -56,7 +56,7 @@
     return `<div class="muted">${snapshot.segments.map(segment => `<div>${segment.startTime}–${segment.endTime} · ${segment.durationHours} ч × ${money(segment.hourlyRate)} = ${money(segment.totalPrice)}</div>`).join('')}</div>`;
   }
   function summary(booking, serviceName) {
-    return `<div class="summary"><strong>${escape(serviceName || booking.serviceName)}</strong><div class="session-date">${dateLabel(booking.date)}</div><div class="session-time">${booking.startTime}–${B.endTime(booking.startTime, booking.durationHours)} <small>МСК</small></div><p class="muted">${hours(booking.durationHours)}</p>${priceBreakdown(booking)}<div class="summary-total"><span>${(booking.priceSnapshot?.isEstimate || booking === bookingDraft && current()?.publicCategory === 'other') ? 'Предварительно, от' : 'Итого'}</span><strong>${money(booking.price)}</strong></div></div>`;
+    return `<div class="summary"><strong>${escape(serviceName || booking.serviceName)}</strong><div class="session-date">${dateLabel(booking.date)}</div><div class="session-time">${booking.startTime}–${B.endTime(booking.startTime, booking.durationHours)} <small>МСК</small></div><p class="muted">${hours(booking.durationHours)}</p>${priceBreakdown(booking)}<div class="summary-total"><span>${(booking.priceSnapshot?.isEstimate || booking === bookingDraft && current()?.pricingType === 'minimum') ? 'Предварительно, от' : 'Итого'}</span><strong>${money(booking.price)}</strong></div></div>`;
   }
   function contactField(name, label, options = '') {
     return `<label for="contact-${name}">${label}</label><input id="contact-${name}" name="${name}" ${options} value="${escape(bookingDraft.client[name])}" aria-invalid="${!!fieldErrors[name]}" aria-describedby="error-${name}"><p class="field-error" id="error-${name}" aria-live="polite">${escape(fieldErrors[name] || '')}</p>`;
@@ -95,7 +95,7 @@
     renderNavigation();
     let html = '';
     if (screen === 'other') {
-      html = button('← Назад', 'home', 'back') + heading('СТУДИЙНЫЕ УСЛУГИ', 'Прочие услуги', 'Выбери, что будем делать в студии') + '<div class="service-list">' + services.filter(s => s.publicVisible && s.publicCategory === 'other' && ['studio-mixing','studio-beatmaking','studio-mix-master'].includes(s.id)).map(s => `<button class="service-card" data-service-quick="${escape(s.id)}"><span class="service-copy"><strong>${escape(s.publicName)}</strong><small>${s.selectDuration ? 'От 2 часов' : hours(s.defaultDurationHours)}</small><b>от ${money(s.price)}</b></span></button>`).join('') + '</div>';
+      html = button('← Назад', 'home', 'back') + heading('СТУДИЙНЫЕ УСЛУГИ', 'Прочие услуги', 'Выбери, что будем делать в студии') + '<div class="service-list">' + services.filter(s => s.publicVisible && s.publicCategory === 'other' && ['studio-mixing','studio-beatmaking','studio-mix-master'].includes(s.id)).map(s => `<button class="service-card" data-service-quick="${escape(s.id)}"><span class="service-copy"><strong>${escape(s.publicName)}</strong><small>${s.selectDuration ? 'От 2 часов' : hours(s.defaultDurationHours)}</small><b>${s.pricingType === 'minimum' ? 'от ' : ''}${money(s.price)}</b></span></button>`).join('') + '</div>';
     } else if (screen === 'home') {
       const [bookingResult, loyaltyResult] = await Promise.allSettled([API.getMyBookings(), window.KrugLoyalty.getLoyaltyBalance()]);
       const bookings = bookingResult.status === 'fulfilled' ? bookingResult.value : [];
@@ -118,7 +118,7 @@
         html += `<div class="duration-grid">${Array.from({ length: 8 }, (_, i) => i + 1).filter(n => n >= (current().minDurationHours || 1)).map(n => {
           const available = current().selectDuration || current().priceTiers.some(t => t.durationHours === n);
           return `<button class="duration ${bookingDraft.durationHours === n ? 'selected' : ''}" data-duration="${n}" aria-label="${hours(n)}${available ? '' : ' — недоступно'}" aria-pressed="${bookingDraft.durationHours === n}" ${available ? '' : 'disabled'}>${n}<small>${n === 1 ? 'час' : n < 5 ? 'часа' : 'часов'}</small></button>`;
-        }).join('')}</div>${current().priceTiers && current().priceTiers.length < 8 ? '<p class="muted">Некоторые варианты длительности недоступны для этой услуги.</p>' : ''}${flowMessage ? `<p class="flow-message" role="status">${escape(flowMessage)}</p>` : ''}<div class="price-panel"><span>${bookingDraft.durationHours ? hours(bookingDraft.durationHours) : 'Выбери длительность'}</span><strong>${bookingDraft.price === null ? '—' : (current()?.publicCategory === 'other' ? 'от ' : '') + money(bookingDraft.price)}</strong>${bookingDraft.durationHours && current().pricingType === 'hourly' ? `<small>${money(Math.round(bookingDraft.price / bookingDraft.durationHours))} / час</small>` : ''}</div>${footer('Выбрать дату', !!bookingDraft.durationHours)}`;
+        }).join('')}</div>${current().priceTiers && current().priceTiers.length < 8 ? '<p class="muted">Некоторые варианты длительности недоступны для этой услуги.</p>' : ''}${flowMessage ? `<p class="flow-message" role="status">${escape(flowMessage)}</p>` : ''}<div class="price-panel"><span>${bookingDraft.durationHours ? hours(bookingDraft.durationHours) : 'Выбери длительность'}</span><strong>${bookingDraft.price === null ? '—' : (current()?.pricingType === 'minimum' ? 'от ' : '') + money(bookingDraft.price)}</strong>${bookingDraft.durationHours && current().pricingType === 'hourly' ? `<small>${money(Math.round(bookingDraft.price / bookingDraft.durationHours))} / час</small>` : ''}</div>${footer('Выбрать дату', !!bookingDraft.durationHours)}`;
       } else if (label === 'Дата') {
         html += heading('ВСТРЕТИМСЯ В СТУДИИ', 'В какой день?', 'Ближайшие 3 недели · московское время');
         const dates = Array.from({ length: 21 }, (_, i) => B.addDays(B.today(), i));

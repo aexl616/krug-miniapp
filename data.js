@@ -6,7 +6,7 @@ window.KrugData = (() => {
   const tiers = values => values.flatMap((price, i) => price === null ? [] : [{ durationHours: i + 1, totalPrice: price }]);
   const services = [
     { id: 'recording', name: 'Запись', description: 'Запись звука в студии. Запись со сведением — отдельная услуга.', pricingType: 'hourly', priceTiers: tiers([1200,2400,3600,4800,6000,7200,8400,9600]), active: true },
-    { id: 'morning', name: 'Запись утром', description: 'Запись по отдельной утренней цене. Начало только до 12:00.', pricingType: 'hourly', priceTiers: tiers([1000,null,2800,3600,4400,5200,6000,6800]), latestStartHour: 11, active: true },
+    { id: 'morning', name: 'Запись утром', description: 'Архивная услуга. Только для истории записей.', pricingType: 'hourly', priceTiers: tiers([1000,null,2800,3600,4400,5200,6000,6800]), legacyOnly: true, active: true },
     { id: 'recording-mix', minDurationHours: 2, name: 'Запись + сведение', description: 'Запись звука и сведение в одном формате.', pricingType: 'hourly', priceTiers: tiers([1800,3600,4800,6000,7200,8400,9600,10800]), active: true },
     { id: 'rental', name: 'Аренда', description: 'Студия для твоей самостоятельной работы', pricingType: 'hourly', priceTiers: tiers([1000,null,2800,3600,4400,5100,5800,6500]), active: true }
   ];
@@ -51,7 +51,7 @@ window.KrugData = (() => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < B.today() || date > B.addDays(B.today(), 20)) return { date, closed: true, busy: [] };
     const day = new Date(`${date}T12:00:00Z`).getUTCDay();
     // One studio, shared busy intervals. Sundays are closed in this mock.
-    const busy = day % 2 === 0 ? [{ start: 13 * 60, end: 15 * 60 }] : [{ start: 17 * 60, end: 19 * 60 }];
+    const busy = [1,2,4].includes(day) ? [] : day % 2 === 0 ? [{ start: 13 * 60, end: 15 * 60 }] : [{ start: 17 * 60, end: 19 * 60 }];
     for (const booking of readBookings()) {
       if (booking.status === 'cancelled') continue;
       const offset = (Date.parse(booking.date+'T00:00:00Z')-Date.parse(date+'T00:00:00Z'))/60000;
@@ -62,6 +62,7 @@ window.KrugData = (() => {
   }
   async function getAvailableSlots(date, durationHours, serviceId) {
     const selected = serviceId ? await getService(serviceId) : null;
+    if (selected?.legacyOnly) return [];
     if (selected?.isRentalPackage) {
       if (durationHours !== 12 || new Date(date+'T'+selected.fixedStart+':00+03:00') <= new Date()) return [];
       const start=B.toMinutes(selected.fixedStart), end=start+720;
@@ -74,16 +75,13 @@ window.KrugData = (() => {
     }
     if (selected?.minDurationHours && durationHours < selected.minDurationHours) return [];
     let slots = B.availableSlots(await getAvailability(date), durationHours);
-    if (serviceId) {
-      const service = await getService(serviceId);
-      if (service.latestStartHour !== undefined) slots = slots.filter(slot => B.toMinutes(slot) <= service.latestStartHour * 60);
-    }
     return slots;
   }
   async function createBooking(data) {
     // Serializes cooperating tabs where Web Locks is available. A real server must
     // enforce uniqueness and interval conflicts transactionally in 0.2.
     const save = async () => {
+      if ((await getService(data.serviceId)).legacyOnly) throw new Error('Архивная услуга недоступна для новых записей. Выбери «Запись».');
       const rows = readBookings();
       const existing = rows.find(b => b.requestId === data.requestId && b.clientId === CLIENT_ID);
       if (existing) return structuredClone(existing);
