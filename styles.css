@@ -80,4 +80,4 @@ main { min-height: 0; flex: 1; display: flex; flex-direction: column; padding-to
 .loyalty-history small { color: var(--muted); font-size: 12px; }
 .bonus-positive { color: #a5e0b7; }
 .booking-card h2 { overflow-wrap: anywhere; }
-@media (max-height: 520px) { .booking-navigation { display: none; } }
+.booking-navigation { display: none; }

@@ -84,7 +84,7 @@
   async function renderProfile() {
     const [client, loyalty, history] = await Promise.all([window.KrugClient.getCurrentClient(), window.KrugLoyalty.getLoyaltyBalance(), window.KrugLoyalty.getLoyaltyHistory()]);
     const initials = client.name.split(/\s+/).filter(Boolean).slice(0,2).map(part => [...part][0]).join('');
-    return `${heading('ТВОЙ КРУГ', 'Профиль')}<section class="profile-identity"><div class="avatar" aria-label="Аватар-заглушка">${escape(initials)}</div><div><h2>${escape(client.name)}</h2><p class="muted">${escape(client.telegram || 'Telegram не указан')}</p></div></section><dl class="profile-contacts"><div><dt>Телефон</dt><dd>${escape(client.phone || 'Не указан')}</dd></div></dl><div class="profile-stats"><div><strong>${client.visits}</strong><span>Посещений</span></div><div><strong>${money(client.totalSpent)}</strong><span>Потрачено всего</span></div></div><p class="muted stats-note">По завершённым записям.</p><section class="loyalty-section" aria-labelledby="loyalty-title"><h2 id="loyalty-title">Бонусы</h2><div class="bonus-total"><strong>${bonusCount(loyalty.balance)}</strong><span>бонусов</span></div><p class="muted">1 бонус = ${loyalty.rublesPerBonus} ₽</p><h3>История бонусов</h3><ul class="loyalty-history">${history.map(entry => `<li><div><strong>${escape(entry.title)}</strong><small>${dateLabel(entry.date)}</small></div><span class="${entry.amount > 0 ? 'bonus-positive' : ''}">${entry.amount > 0 ? '+' : '−'}${bonusCount(Math.abs(entry.amount))}</span></li>`).join('')}</ul><p class="muted">Начальный баланс: ${bonusCount(loyalty.openingBalance)} бонусов.</p></section>`;
+    return `${heading('ТВОЙ КРУГ', 'Профиль')}<section class="profile-identity"><div class="avatar" aria-label="Аватар-заглушка">${escape(initials)}</div><div><h2>${escape(client.name)}</h2><p class="muted">${escape(client.telegram || 'Telegram — Не указан')}</p></div></section><dl class="profile-contacts"><div><dt>Телефон</dt><dd>${escape(client.phone || 'Не указан')}</dd></div></dl><div class="profile-stats"><div><strong>${client.visits}</strong><span>Посещений</span></div><div><strong>${money(client.totalSpent)}</strong><span>Потрачено всего</span></div></div><p class="muted stats-note">По завершённым записям.</p><section class="loyalty-section" aria-labelledby="loyalty-title"><h2 id="loyalty-title">Бонусы · демо</h2><div class="bonus-total"><strong>${bonusCount(loyalty.balance)}</strong><span>бонусов</span></div><p class="muted">1 бонус = ${loyalty.rublesPerBonus} ₽</p><p class="muted">Демонстрационный баланс и история — пример, не связанный с твоими посещениями.</p><h3>История бонусов</h3><ul class="loyalty-history">${history.map(entry => `<li><div><strong>${escape(entry.title)}</strong><small>${dateLabel(entry.date)}</small></div><span class="${entry.amount > 0 ? 'bonus-positive' : ''}">${entry.amount > 0 ? '+' : '−'}${bonusCount(Math.abs(entry.amount))}</span></li>`).join('')}</ul><p class="muted">Начальный баланс: ${bonusCount(loyalty.openingBalance)} бонусов.</p></section>`;
   }
   async function render() {
     const version = ++renderId;
@@ -100,9 +100,9 @@
       for (const result of [bookingResult, loyaltyResult]) if (result.status === 'rejected') showError(result.reason);
       if (version !== renderId) return;
       const nearest = account.splitBookings(bookings).upcoming[0];
-      html = '<section class="home-hero"><p class="eyebrow">СТУДИЯ КРУГ · ГЛАВНАЯ</p><h1>Всё крутится<br>вокруг <span>музыки.</span></h1></section><div class="home-actions">' + button('Записаться <span aria-hidden="true">↗</span>', 'start') + '</div>';
+      html = '<section class="home-hero"><p class="eyebrow">СТУДИЯ КРУГ · ГЛАВНАЯ</p><h1>Всё крутится<br>вокруг <span>музыки.</span></h1></section><div class="home-actions">' + button((draftStarted ? 'Продолжить запись' : 'Записаться') + ' <span aria-hidden="true">↗</span>', 'start') + '</div>';
       if (nearest) html += '<section class="home-next"><h2>Ближайшая запись</h2>' + bookingCard(nearest) + '</section>';
-      html += '<section class="home-bonus" aria-label="Бонусный баланс"><span>Твои бонусы<strong>' + (loyalty ? bonusCount(loyalty.balance) : '—') + '</strong></span><span>1 бонус = 1 ₽</span></section>';
+      html += '<section class="home-bonus" aria-label="Бонусный баланс"><span>Демо-бонусы<strong>' + (loyalty ? bonusCount(loyalty.balance) : '—') + '</strong></span><span>1 бонус = 1 ₽</span></section>';
       html += '<section class="home-services"><h2>Быстрый выбор услуги</h2><div class="quick-grid">' + [...services.map((service, index) => [service.id, service.name, String(index + 1).padStart(2, '0')]), ['other', 'Все услуги', String(services.length + 1).padStart(2, '0')]].map(([id, name, num]) => '<button class="quick-card" data-service-quick="' + escape(id) + '"><span class="card-index">' + num + '<span>↗</span></span><strong>' + escape(name) + '</strong></button>').join('') + '</div></section>';
 
     } else if (screen === 'flow') {
@@ -207,6 +207,7 @@
     try {
       if (target.dataset.action) return await navigate(target.dataset.action);
       if (target.dataset.serviceQuick) {
+        if (draftStarted) return await navigate('start');
         resetDraft(); screen = 'flow'; step = 0;
         if (target.dataset.serviceQuick !== 'other') { selectService(target.dataset.serviceQuick); step = 1; }
         await render(); root.querySelector('.screen-content').scrollTop = 0; root.focus({ preventScroll: true }); return;

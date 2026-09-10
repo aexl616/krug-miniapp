@@ -1,6 +1,6 @@
 /* Replace this read-only adapter with the current-client API later. */
 window.KrugClient = (() => {
-  const fallback = { id: 'krug-mock-client', name: 'Александр', telegram: '@krug_guest', phone: '+7 900 000-00-00' };
+  const fallback = { id: 'krug-mock-client', name: 'Демо-профиль', telegram: '', phone: '' };
   async function getCurrentClient() {
     const bookings = await window.KrugData.getMyBookings();
     const latest = [...bookings].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]?.client;

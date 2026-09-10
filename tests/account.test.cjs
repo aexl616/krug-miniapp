@@ -23,7 +23,9 @@ test('fallback profile and completed-only statistics use adapters, not pending a
   assert.equal(profile.totalSpent,5400);
   assert.equal(profile.id,'krug-mock-client');
   const fallback = await setup().KrugClient.getCurrentClient();
-  assert.equal(fallback.name,'Александр');
+  assert.equal(fallback.name,'Демо-профиль');
+  assert.equal(fallback.telegram,'');
+  assert.equal(fallback.phone,'');
   assert.equal(fallback.visits,0);
   assert.equal(fallback.totalSpent,0);
 });

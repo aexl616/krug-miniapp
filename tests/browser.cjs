@@ -33,6 +33,7 @@ const server = http.createServer((req, res) => {
           const dock = document.querySelector('.dock')?.getBoundingClientRect();
           return !dock || content.bottom <= dock.top + 1 && dock.bottom <= innerHeight;
         }), `${width}: dock covers content on ${name}`);
+        if (await page.locator('.flow-nav').count()) assert.equal(await page.locator('#main-navigation').isVisible(), false);
         await page.screenshot({ path: path.join(output, `krug-mini-${width}-${name}.png`), fullPage: true });
       };
       await page.goto(url);
@@ -250,7 +251,7 @@ const server = http.createServer((req, res) => {
       assert.equal(await p.locator('.home-bonus strong').innerText(), '740');
       await p.locator('#main-navigation [data-action="profile"]').click();
       await p.locator('.profile-identity').waitFor();
-      assert.match(await p.locator('.profile-identity').innerText(), /Александр/);
+      assert.match(await p.locator('.profile-identity').innerText(), /Демо-профиль/);
       assert.equal(await p.locator('.bonus-total strong').innerText(), '740');
       assert.equal(await p.locator('.loyalty-history li').count(), 3);
       assert.match(await p.locator('.loyalty-history').innerText(), /−500/);
@@ -268,11 +269,15 @@ const server = http.createServer((req, res) => {
       await p.locator('[data-service="recording"]').click();
       await p.locator('[data-action="next"]').click();
       await p.locator('[data-duration="3"]').click();
+      assert.equal(await p.locator('#main-navigation').isVisible(),false);
+      await p.locator('.brand').click();
+      assert.match(await p.locator('[data-action="start"]').innerText(), /Продолжить запись/);
       await p.locator('#main-navigation [data-action="profile"]').click();
       await p.locator('.profile-identity').waitFor();
       await p.locator('#main-navigation [data-action="home"]').click();
       await p.locator('[data-action="start"]').click();
       assert.equal(await p.locator('[data-duration="3"]').getAttribute('aria-pressed'),'true');
+      await p.locator('.brand').click();
       await p.locator('#main-navigation [data-action="bookings"]').click();
       await p.locator('[data-action="list-history"]').click();
       await p.getByText('История пока пуста',{exact:true}).waitFor();
