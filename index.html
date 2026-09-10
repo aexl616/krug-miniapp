@@ -8,6 +8,7 @@
   <title>КРУГ — Запись в студию</title>
   <link rel="icon" href="logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
+  <script defer src="config.js"></script>
   <script defer src="booking.js"></script>
   <script defer src="data.js"></script>
   <script defer src="telegram.js"></script>
@@ -16,6 +17,7 @@
 <body>
   <div class="shell">
     <header class="header"><button class="brand" data-action="home" aria-label="КРУГ — на главную"><img class="brand-wordmark" src="krug-wordmark.png" alt="КРУГ" width="1776" height="315"></button><span class="edition">СТУДИЯ ЗВУКОЗАПИСИ</span></header>
+    <details id="demo-indicator" class="demo-indicator" hidden><summary>Демо-режим</summary><p>Заявка сохраняется только на этом устройстве и не отправляется в студию.</p></details>
     <main id="app" tabindex="-1"><p>Загружаем студию…</p></main>
     <p id="notice" class="notice" role="alert" hidden></p>
   </div>

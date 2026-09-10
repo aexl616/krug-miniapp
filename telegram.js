@@ -27,5 +27,6 @@ window.KrugTelegram = (() => {
   }
   // Telegram's host may supply the SDK. Browser use has no remote dependency.
   // Unverified Telegram data is used only to prefill fields, never for identity.
-  return { initTelegram, getTelegramUser, expandApp, closeApp, showBack };
+  const isTelegram = () => !!webApp();
+  return { initTelegram, getTelegramUser, expandApp, closeApp, showBack, isTelegram };
 })();
