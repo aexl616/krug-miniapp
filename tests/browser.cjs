@@ -242,5 +242,45 @@ const server = http.createServer((req, res) => {
       await tgContext.close();
     }
     console.log('PASS Telegram with/without username, optional contact submission and production wording flag');
+    for (const [width,height] of [[360,800],[390,844],[430,932]]) {
+      const ctx = await browser.newContext({viewport:{width,height}});
+      const p = await ctx.newPage();
+      await p.goto(url);
+      await p.locator('.home-bonus strong').waitFor();
+      assert.equal(await p.locator('.home-bonus strong').innerText(), '740');
+      await p.locator('#main-navigation [data-action="profile"]').click();
+      await p.locator('.profile-identity').waitFor();
+      assert.match(await p.locator('.profile-identity').innerText(), /Александр/);
+      assert.equal(await p.locator('.bonus-total strong').innerText(), '740');
+      assert.equal(await p.locator('.loyalty-history li').count(), 3);
+      assert.match(await p.locator('.loyalty-history').innerText(), /−500/);
+      assert.equal(await p.locator('#main-navigation [aria-current="page"]').getAttribute('data-action'), 'profile');
+      await p.screenshot({path:path.join(output,'krug-account-'+width+'.png')});
+      await p.locator('.loyalty-history li').last().scrollIntoViewIfNeeded();
+      assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      assert.ok(await p.evaluate(() => {
+        const nav=document.querySelector('#main-navigation').getBoundingClientRect();
+        const content=document.querySelector('.screen-content').getBoundingClientRect();
+        return content.bottom <= nav.top && nav.bottom <= innerHeight && [...document.querySelectorAll('#main-navigation button')].every(b=>b.getBoundingClientRect().height>=44);
+      }));
+      await p.locator('#main-navigation [data-action="home"]').click();
+      await p.locator('[data-action="start"]').click();
+      await p.locator('[data-service="recording"]').click();
+      await p.locator('[data-action="next"]').click();
+      await p.locator('[data-duration="3"]').click();
+      await p.locator('#main-navigation [data-action="profile"]').click();
+      await p.locator('.profile-identity').waitFor();
+      await p.locator('#main-navigation [data-action="home"]').click();
+      await p.locator('[data-action="start"]').click();
+      assert.equal(await p.locator('[data-duration="3"]').getAttribute('aria-pressed'),'true');
+      await p.locator('#main-navigation [data-action="bookings"]').click();
+      await p.locator('[data-action="list-history"]').click();
+      await p.getByText('История пока пуста',{exact:true}).waitFor();
+      await p.locator('#main-navigation [data-action="home"]').click();
+      await p.locator('.home-bonus').waitFor();
+      await ctx.close();
+      console.log('PASS account navigation, loyalty, draft resume and touch layout '+width);
+    }
+
   } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });

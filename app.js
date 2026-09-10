@@ -2,6 +2,8 @@
   const API = window.KrugData, B = window.KrugBooking, TG = window.KrugTelegram;
   const root = document.getElementById('app');
   const notice = document.getElementById('notice');
+  const account = window.KrugAccount;
+  const navigation = document.getElementById('main-navigation');
   const DEMO_MODE = window.KrugConfig.DEMO_MODE;
   document.getElementById('demo-indicator').hidden = !DEMO_MODE;
   const syncViewport = () => document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height || window.innerHeight}px`);
@@ -16,6 +18,7 @@
   let services = [], screen = 'home', step = 0, busy = false, renderId = 0, saved = null;
   let dateLimit = 8, flowMessage = '', transitioning = false;
   let fieldErrors = {};
+  let bookingsTab = 'upcoming', draftStarted = false;
   const current = () => services.find(s => s.id === bookingDraft.serviceId);
   const steps = () => current()?.pricingType === 'fixed' ? ['Услуга', 'Дата', 'Время', 'Подтверждение'] : ['Услуга', 'Длительность', 'Дата', 'Время', 'Подтверждение'];
   const button = (label, action, cls = 'primary', disabled = false) => `<button class="${cls}" data-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button>`;
@@ -23,6 +26,7 @@
   function showError(error) { notice.textContent = error.message || 'Не получилось загрузить страницу. Попробуй ещё раз.'; notice.hidden = false; }
   function resetDraft() {
     bookingDraft = B.newDraft();
+    draftStarted = true;
     dateLimit = 8; flowMessage = ''; fieldErrors = {};
     const user = TG.getTelegramUser();
     if (user) bookingDraft.client = { name: [user.first_name, user.last_name].filter(Boolean).join(' '), phone: '', telegram: user.username ? `@${user.username}` : '' };
@@ -64,14 +68,43 @@
       if (message) message.textContent = errors[name] || '';
     }
   }
+  function renderNavigation() {
+    const active = screen === 'success' ? 'bookings' : screen;
+    const items = [['home', 'Главная', '⌂'], ['flow', 'Записаться', '+'], ['bookings', 'Мои записи', '≡'], ['profile', 'Профиль', '○']];
+    // Booking starts or resumes from the primary action on Home.
+    navigation.innerHTML = items.filter(([id]) => id !== 'flow').map(([id, label, icon]) => `<button type="button" data-action="${id === 'flow' ? 'resume' : id}" ${active === id ? 'aria-current="page"' : ''}><span aria-hidden="true">${icon}</span>${label}</button>`).join('');
+    navigation.classList.toggle('booking-navigation', screen === 'flow');
+    document.title = `КРУГ — ${items.find(([id]) => id === active)?.[1] || 'Запись'}`;
+  }
+  function bookingCard(booking) {
+    const status = Object.hasOwn(account.statuses, booking.status) ? booking.status : 'request';
+    return `<article class="booking-card"><span class="status ${status}">${account.statuses[status]}</span><h2>${escape(booking.serviceName)}</h2><p>${dateLabel(booking.date)} · ${booking.startTime}–${B.endTime(booking.startTime, booking.durationHours)}</p><div class="summary-line"><span>${hours(booking.durationHours)}</span><strong>${money(booking.price)}</strong></div></article>`;
+  }
+  function bonusCount(value) { return new Intl.NumberFormat('ru-RU').format(value); }
+  async function renderProfile() {
+    const [client, loyalty, history] = await Promise.all([window.KrugClient.getCurrentClient(), window.KrugLoyalty.getLoyaltyBalance(), window.KrugLoyalty.getLoyaltyHistory()]);
+    const initials = client.name.split(/\s+/).filter(Boolean).slice(0,2).map(part => [...part][0]).join('');
+    return `${heading('ТВОЙ КРУГ', 'Профиль')}<section class="profile-identity"><div class="avatar" aria-label="Аватар-заглушка">${escape(initials)}</div><div><h2>${escape(client.name)}</h2><p class="muted">${escape(client.telegram || 'Telegram не указан')}</p></div></section><dl class="profile-contacts"><div><dt>Телефон</dt><dd>${escape(client.phone || 'Не указан')}</dd></div></dl><div class="profile-stats"><div><strong>${client.visits}</strong><span>Посещений</span></div><div><strong>${money(client.totalSpent)}</strong><span>Потрачено всего</span></div></div><p class="muted stats-note">По завершённым записям.</p><section class="loyalty-section" aria-labelledby="loyalty-title"><h2 id="loyalty-title">Бонусы</h2><div class="bonus-total"><strong>${bonusCount(loyalty.balance)}</strong><span>бонусов</span></div><p class="muted">1 бонус = ${loyalty.rublesPerBonus} ₽</p><h3>История бонусов</h3><ul class="loyalty-history">${history.map(entry => `<li><div><strong>${escape(entry.title)}</strong><small>${dateLabel(entry.date)}</small></div><span class="${entry.amount > 0 ? 'bonus-positive' : ''}">${entry.amount > 0 ? '+' : '−'}${bonusCount(Math.abs(entry.amount))}</span></li>`).join('')}</ul><p class="muted">Начальный баланс: ${bonusCount(loyalty.openingBalance)} бонусов.</p></section>`;
+  }
   async function render() {
     const version = ++renderId;
     refreshPrice();
     notice.hidden = true;
     TG.showBack(screen !== 'home');
+    renderNavigation();
     let html = '';
     if (screen === 'home') {
-      html = `<section class="home-hero"><p class="eyebrow">МЕСТО ДЛЯ ТВОЕГО ЗВУКА</p><h1>Всё крутится<br>вокруг <span>музыки.</span></h1><div class="circle-mark" aria-hidden="true">↗</div></section><div class="home-actions">${button('Записаться <span aria-hidden="true">↗</span>', 'start')}${button('Мои записи', 'bookings', 'secondary')}</div><div class="section-label">НАЙДИ СВОЙ ФОРМАТ <span>01—04</span></div><div class="quick-grid">${[['recording','Запись','01'],['recording-mix','Запись + сведение','02'],['rental','Аренда','03'],['other','Все услуги','04']].map(([id, name, num]) => `<button class="quick-card" data-service-quick="${id}"><span class="card-index">${num}<span>↗</span></span><strong>${name}</strong></button>`).join('')}</div>`;
+      const [bookingResult, loyaltyResult] = await Promise.allSettled([API.getMyBookings(), window.KrugLoyalty.getLoyaltyBalance()]);
+      const bookings = bookingResult.status === 'fulfilled' ? bookingResult.value : [];
+      const loyalty = loyaltyResult.status === 'fulfilled' ? loyaltyResult.value : null;
+      for (const result of [bookingResult, loyaltyResult]) if (result.status === 'rejected') showError(result.reason);
+      if (version !== renderId) return;
+      const nearest = account.splitBookings(bookings).upcoming[0];
+      html = '<section class="home-hero"><p class="eyebrow">СТУДИЯ КРУГ · ГЛАВНАЯ</p><h1>Всё крутится<br>вокруг <span>музыки.</span></h1></section><div class="home-actions">' + button('Записаться <span aria-hidden="true">↗</span>', 'start') + '</div>';
+      if (nearest) html += '<section class="home-next"><h2>Ближайшая запись</h2>' + bookingCard(nearest) + '</section>';
+      html += '<section class="home-bonus" aria-label="Бонусный баланс"><span>Твои бонусы<strong>' + (loyalty ? bonusCount(loyalty.balance) : '—') + '</strong></span><span>1 бонус = 1 ₽</span></section>';
+      html += '<section class="home-services"><h2>Быстрый выбор услуги</h2><div class="quick-grid">' + [...services.map((service, index) => [service.id, service.name, String(index + 1).padStart(2, '0')]), ['other', 'Все услуги', String(services.length + 1).padStart(2, '0')]].map(([id, name, num]) => '<button class="quick-card" data-service-quick="' + escape(id) + '"><span class="card-index">' + num + '<span>↗</span></span><strong>' + escape(name) + '</strong></button>').join('') + '</div></section>';
+
     } else if (screen === 'flow') {
       const labels = steps(), label = labels[step];
       html = `<nav class="flow-nav" aria-label="Навигация записи">${button('← Назад', 'back', 'back')}<span>${step + 1} / ${labels.length} · ${label}</span></nav><div class="progress" aria-label="Шаг ${step + 1} из ${labels.length}">${labels.map((_, i) => `<span class="${i <= step ? 'filled' : ''}"></span>`).join('')}</div>`;
@@ -126,15 +159,18 @@
 
       }
     } else if (screen === 'success') {
-      html = '<div class="success-icon" aria-hidden="true">✓</div>' + heading('ТВОЯ СЛЕДУЮЩАЯ СЕССИЯ', DEMO_MODE ? 'Демо-заявка создана' : 'Заявка отправлена', DEMO_MODE ? '' : 'Студия свяжется с тобой и подтвердит время.') + summary(saved) + '<div class="stack">' + button('Мои записи', 'bookings') + button('На главную', 'home', 'secondary') + '</div>';
+      html = '<div class="success-icon" aria-hidden="true">✓</div>' + heading('ТВОЯ СЛЕДУЮЩАЯ СЕССИЯ', DEMO_MODE ? 'Демо-заявка создана' : 'Заявка отправлена', DEMO_MODE ? '' : 'Студия свяжется с тобой и подтвердит время.') + summary(saved) + '<p class="muted">Заявка доступна в разделе «Мои записи».</p>';
+    } else if (screen === 'profile') {
+      html = await renderProfile();
     } else {
-      const bookings = await API.getMyBookings();
+      const groups = account.splitBookings(await API.getMyBookings());
       if (version !== renderId) return;
-      html = `${button('← На главную', 'home', 'back')}${heading('ТВОЁ ВРЕМЯ В КРУГЕ', 'Мои записи')}<p class="muted">Записи на этом устройстве · время МСК</p>`;
-      const statuses = { request: DEMO_MODE ? 'Демо-заявка создана' : 'Заявка отправлена', confirmed: 'Подтверждено', cancelled: 'Отменено' };
-      html += bookings.length ? `<div class="booking-list">${bookings.map(b => `<article class="booking-card"><span class="status ${['confirmed','cancelled'].includes(b.status) ? b.status : ''}">${statuses[b.status] || 'Заявка'}</span><h2>${escape(b.serviceName)}</h2><p>${dateLabel(b.date)} · ${b.startTime}–${B.endTime(b.startTime, b.durationHours)}</p><div class="summary-line"><span>${hours(b.durationHours)}</span><strong>${money(b.price)}</strong></div></article>`).join('')}</div>` : `<div class="empty"><span class="empty-symbol" aria-hidden="true">↗</span><h2>Всё начинается с записи</h2><p class="muted">Выбери время для своей первой сессии.</p></div>`;
-      html += `<div class="stack">${button('Записаться', 'start')}</div>`;
+      const bookings = groups[bookingsTab];
+      html = heading('ТВОЁ ВРЕМЯ В КРУГЕ', 'Мои записи') + '<p class="muted">Время московское</p><div class="booking-tabs" role="tablist" aria-label="Раздел записей">' + [['upcoming','Ближайшие'],['history','История']].map(([id,label]) => '<button role="tab" id="tab-' + id + '" aria-controls="booking-panel" aria-selected="' + (bookingsTab === id) + '" data-action="list-' + id + '">' + label + ' <span>' + groups[id].length + '</span></button>').join('') + '</div><section id="booking-panel" role="tabpanel" aria-labelledby="tab-' + bookingsTab + '">';
+      html += bookings.length ? '<div class="booking-list">' + bookings.map(bookingCard).join('') + '</div>' : '<div class="empty"><h2>' + (bookingsTab === 'history' ? 'История пока пуста' : 'Время для новой сессии') + '</h2><p class="muted">' + (bookingsTab === 'history' ? 'Здесь появятся прошедшие и отменённые записи.' : 'Открой главную и нажми «Записаться» — найдём удобное время.') + '</p></div>';
+      html += '</section>';
     }
+
     if (version !== renderId) return;
     const previousScroll = root.querySelector('.screen-content')?.scrollTop || 0;
     root.innerHTML = `<div class="screen-content">${html}</div>`;
@@ -146,7 +182,9 @@
     if (busy) return;
     if (action === 'home') screen = 'home';
     if (action === 'bookings') screen = 'bookings';
-    if (action === 'start') { resetDraft(); screen = 'flow'; step = 0; }
+    if (action === 'profile') screen = 'profile';
+    if (action === 'start') { if (!draftStarted) { resetDraft(); step = 0; } screen = 'flow'; }
+    if (action === 'list-upcoming' || action === 'list-history') bookingsTab = action === 'list-upcoming' ? 'upcoming' : 'history';
     if (action === 'more-dates') dateLimit += 8;
     if (action === 'back') {
       if (screen === 'flow' && step > 0) step--; else screen = 'home';
@@ -210,7 +248,7 @@
     submit.disabled = true; submit.textContent = 'Сохраняем…';
     try {
       saved = await API.createBooking(structuredClone(bookingDraft));
-      screen = 'success'; await render(); root.querySelector('.screen-content').scrollTop = 0; root.focus();
+      screen = 'success'; draftStarted = false; await render(); root.querySelector('.screen-content').scrollTop = 0; root.focus();
     } catch (error) {
       if (error.fields) { displayFieldErrors(error.fields); document.getElementById(`contact-${Object.keys(error.fields)[0]}`)?.focus(); }
       else {

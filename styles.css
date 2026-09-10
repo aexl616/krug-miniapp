@@ -32,3 +32,52 @@ main { min-height: 0; flex: 1; display: flex; flex-direction: column; padding-to
 .session-time small { font-size: 12px; }
 @media (min-width: 600px) { .shell { height: calc(var(--app-height, 100dvh) - 48px); min-height: 0; } }
 @media (max-height: 520px) { .shell { padding-top: max(6px, env(safe-area-inset-top), var(--tg-inset-top)); } .header { padding-bottom: 4px; } .screen-content { padding-top: 12px; } .demo-indicator summary { min-height: 44px; } }
+/* 0.2 client shell: navigation is a sibling of the content and action bar. */
+.main-navigation { display: flex; flex: none; gap: 4px; border-top: 1px solid var(--line); margin-top: 12px; padding-top: 6px; }
+.main-navigation button { background: none; border-radius: 12px; min-width: 0; min-height: 54px; flex: 1; padding: 6px 2px; display: grid; justify-items: center; align-content: center; gap: 3px; font-size: 11px; color: var(--muted); }
+.main-navigation button > span { font-size: 22px; line-height: 22px; }
+.main-navigation [aria-current="page"] { color: var(--accent); background: #201914; }
+.main-navigation button:focus-visible { outline-offset: -2px; }
+.home-hero { padding: 0 0 18px; }
+.home-hero h1 { margin: 14px 0 4px; }
+.home-next { margin-top: 28px; }
+.home-next > h2 { font-size: 16px; color: var(--muted); }
+.home-next .booking-card { background: none; border: none; border-left: 2px solid var(--accent); border-radius: 0; padding: 4px 0 4px 16px; }
+.home-bonus { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 24px 0; padding: 20px 0; border-block: 1px solid var(--line); }
+.home-bonus > span:first-child { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+.home-bonus strong { font-size: 34px; color: var(--text); letter-spacing: -1px; }
+.home-bonus > span:last-child { font-size: 13px; color: var(--muted); }
+.home-services h2 { font-size: 15px; font-weight: 500; color: var(--muted); }
+.home-services .quick-card { min-height: 88px; gap: 10px; border: 0; }
+.home-services .quick-card strong { font-size: 15px; }
+.booking-tabs { display: flex; gap: 6px; padding: 4px; background: var(--surface); border-radius: 14px; margin: 20px 0; }
+.booking-tabs button { flex: 1; min-height: 44px; padding: 10px 8px; border-radius: 10px; background: none; color: var(--muted); font-size: 14px; }
+.booking-tabs [aria-selected="true"] { background: #39312b; color: var(--text); }
+.booking-tabs span { margin-left: 6px; color: var(--muted); font-size: 12px; }
+.status.completed { background: #193b2a; color: #a5e0b7; }
+.profile-identity { display: flex; align-items: center; gap: 18px; margin: 26px 0; }
+.profile-identity > div:last-child { min-width: 0; }
+.profile-identity h2 { margin-bottom: 5px; font-size: 25px; overflow-wrap: anywhere; }
+.profile-identity p { margin: 0; overflow-wrap: anywhere; }
+.avatar { width: 68px; height: 68px; flex: none; border-radius: 50%; background: var(--accent); color: #111; font-size: 24px; font-weight: 700; display: grid; place-items: center; }
+.profile-contacts { margin: 0 0 24px; }
+.profile-contacts > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.profile-contacts dt { color: var(--muted); }
+.profile-contacts dd { margin: 0; overflow-wrap: anywhere; }
+.profile-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.profile-stats > div { display: grid; gap: 8px; }
+.profile-stats strong { font-size: 26px; overflow-wrap: anywhere; }
+.profile-stats span, .stats-note { color: var(--muted); font-size: 12px; }
+.loyalty-section { border-top: 1px solid var(--line); margin-top: 28px; padding-top: 24px; }
+.bonus-total { display: flex; align-items: baseline; gap: 12px; }
+.bonus-total strong { font-size: 44px; color: var(--accent); letter-spacing: -1px; }
+.bonus-total > span { color: var(--muted); font-size: 15px; }
+.loyalty-section h3 { font-size: 16px; font-weight: 500; margin-top: 26px; }
+.loyalty-history { padding: 0; list-style: none; margin: 0; }
+.loyalty-history li { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 15px 0; border-bottom: 1px solid var(--line); }
+.loyalty-history li > div { display: grid; gap: 5px; }
+.loyalty-history strong { font-size: 15px; font-weight: 500; }
+.loyalty-history small { color: var(--muted); font-size: 12px; }
+.bonus-positive { color: #a5e0b7; }
+.booking-card h2 { overflow-wrap: anywhere; }
+@media (max-height: 520px) { .booking-navigation { display: none; } }
