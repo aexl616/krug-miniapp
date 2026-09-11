@@ -1,2 +1,5 @@
-// Presentation switch only. Turning demo off does not connect a real service.
-window.KrugConfig = Object.freeze({ DEMO_MODE: true });
+// Demo UI is still enabled while booking/storage adapters migrate to the real API.
+window.KrugConfig = Object.freeze({
+  DEMO_MODE: true,
+  API_BASE: 'https://krug-crm.vercel.app'
+});
