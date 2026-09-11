@@ -3,6 +3,7 @@ window.KrugClient = (() => {
   const fallback = { id: 'krug-mock-client', name: 'Демо-профиль', telegram: '', phone: '' };
   const PROFILE_KEY='krug_mini_client_v1';
   function readProfile(){const raw=localStorage.getItem(PROFILE_KEY);return raw ? JSON.parse(raw) : {};}
+  function writeProfile(profile){localStorage.setItem(PROFILE_KEY,JSON.stringify(profile));}
 
   async function registerBackend(profile){
     if (!profile.telegramUserId) return null;
@@ -32,15 +33,23 @@ window.KrugClient = (() => {
     if(telegramUser?.username)next.telegram=`@${telegramUser.username}`;
     next.onboarded=true;
     const remote=await registerBackend(next);
-    if(remote?.banned)next.banned=true;else if(remote)next.banned=false;
-    localStorage.setItem(PROFILE_KEY,JSON.stringify(next));
+    if(remote){next.backendSynced=true;next.banned=!!remote.banned;}
+    writeProfile(next);
     return getCurrentClient();
   }
   async function getCurrentClient() {
-    const profile=readProfile();
+    let profile=readProfile();
+    const telegram = window.KrugTelegram.getTelegramUser();
+    if(profile.onboarded && telegram?.id && !profile.backendSynced && profile.name && profile.phone){
+      try{
+        const syncProfile={...profile,telegramUserId:telegram.id,telegram:telegram.username?`@${telegram.username}`:(profile.telegram||'')};
+        const remote=await registerBackend(syncProfile);
+        profile={...syncProfile,backendSynced:true,banned:!!remote?.banned};
+        writeProfile(profile);
+      }catch{/* Keep the app usable and retry the backfill on a later open. */}
+    }
     const bookings = await window.KrugData.getMyBookings();
     const latest = [...bookings].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]?.client;
-    const telegram = window.KrugTelegram.getTelegramUser();
     const completed = bookings.filter(booking => booking.status === 'completed');
     const telegramName = telegram ? [telegram.first_name, telegram.last_name].filter(Boolean).join(' ') : '';
     return {
