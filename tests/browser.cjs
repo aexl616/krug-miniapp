@@ -318,7 +318,7 @@ const server = http.createServer((req, res) => {
       await p.locator('[data-action="next"]').click();
       await p.locator('[data-time]').first().click();
       await p.locator('[data-action="next"]').click();
-      assert.match(await p.locator('.summary-total').innerText(),/Итого/);
+      assert.match(await p.locator('.summary-total').innerText(),/Стоимость/);
       assert.doesNotMatch(await p.locator('.summary-total').innerText(),/от/);
       await p.screenshot({path:path.join(output,'krug-other-'+width+'.png')});
       await p.locator('[data-action="back"]').click();
@@ -354,5 +354,41 @@ const server = http.createServer((req, res) => {
       }
       console.log('PASS rental Day/Night confirmation and creation '+width);
     }
+
+    const stateContext=await browser.newContext({viewport:{width:360,height:800}});
+    const statePage=await stateContext.newPage();
+    await statePage.goto(url);
+    await statePage.locator('[data-service-quick="recording"]').click();
+    await statePage.locator('[data-duration="2"]').click();
+    await statePage.evaluate(()=>{window.originalSlots=KrugData.getAvailableSlots;KrugData.getAvailableSlots=async()=>{await new Promise(r=>setTimeout(r,700));throw new Error('test outage');};});
+    await statePage.locator('[data-action="next"]').click();
+    await statePage.getByText('Загружаем свободное время…',{exact:true}).waitFor();
+    await statePage.getByRole('heading',{name:'Не удалось загрузить расписание'}).waitFor();
+    await statePage.evaluate(()=>{KrugData.getAvailableSlots=async()=>[];});
+    await statePage.getByRole('button',{name:'Попробовать ещё раз'}).click();
+    await statePage.getByText('В ближайшие 3 недели нет свободного времени на эту длительность. Попробуй выбрать другую.',{exact:true}).waitFor();
+    await statePage.evaluate(()=>{KrugData.getAvailableSlots=window.originalSlots;});
+    await statePage.locator('[data-action="back"]').click();
+    assert.equal(await statePage.locator('[data-duration="2"]').getAttribute('aria-pressed'),'true');
+    await statePage.locator('[data-action="next"]').click();
+    await statePage.locator('[data-date]').first().click();
+    await statePage.locator('[data-action="next"]').click();
+    await statePage.locator('[data-time]').first().click();
+    await statePage.locator('[data-action="next"]').click();
+    await statePage.locator('#contact-name').fill('Тест');await statePage.locator('#contact-phone').fill('79991234567');
+    await statePage.getByRole('button',{name:'Отправить заявку'}).click();
+    await statePage.getByText('Ожидает подтверждения',{exact:true}).waitFor();
+    await statePage.locator('[data-action="success-bookings"]').click();await statePage.locator('.booking-card').waitFor();
+    await stateContext.close();console.log('PASS loading/error/retry/empty/recovery/success states');
+
+    for(const [width,height] of [[360,800],[390,844],[430,932]]) {
+      const ctx=await browser.newContext({viewport:{width,height}}), p=await ctx.newPage();
+      await p.route('**/data.js',async route=>{const response=await route.fetch();await route.fulfill({response,body:await response.text()+'\nconst baseServices=KrugData.getServices;KrugData.getServices=async()=>{const result=await baseServices();const s=result.find(x=>x.id==="recording");s.publicName="Запись вокала и музыкальных инструментов в студии КРУГ";s.priceTiers[0].totalPrice=12000;return result;};'});});
+      await p.goto(url);await p.locator('.quick-card b').first().waitFor();
+      assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      assert.match(await p.locator('.quick-card b').first().innerText(),/12\s000/);
+      await p.screenshot({path:path.join(output,'krug-long-services-'+width+'.png')});await ctx.close();
+    }
+    console.log('PASS long service names and 12000 price at all mobile widths');
   } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });

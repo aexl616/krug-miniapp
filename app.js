@@ -56,7 +56,7 @@
     return `<div class="muted">${snapshot.segments.map(segment => `<div>${segment.startTime}–${segment.endTime} · ${segment.durationHours} ч × ${money(segment.hourlyRate)} = ${money(segment.totalPrice)}</div>`).join('')}</div>`;
   }
   function summary(booking, serviceName) {
-    return `<div class="summary"><strong>${escape(serviceName || booking.serviceName)}</strong><div class="session-date">${dateLabel(booking.date)}</div><div class="session-time">${booking.startTime}–${B.endTime(booking.startTime, booking.durationHours)} <small>МСК</small></div><p class="muted">${hours(booking.durationHours)}</p>${priceBreakdown(booking)}<div class="summary-total"><span>${(booking.priceSnapshot?.isEstimate || booking === bookingDraft && current()?.pricingType === 'minimum') ? 'Предварительно, от' : 'Итого'}</span><strong>${money(booking.price)}</strong></div></div>`;
+    return `<div class="summary"><strong>${escape(serviceName || booking.serviceName)}</strong><div class="session-date">${dateLabel(booking.date)}</div><div class="session-time">${booking.startTime}–${B.endTime(booking.startTime, booking.durationHours)} <small>МСК</small></div><p class="muted">${hours(booking.durationHours)}</p>${priceBreakdown(booking) ? '<details class="price-details"><summary>Как рассчитана стоимость</summary>'+priceBreakdown(booking)+'</details>' : ''}<div class="summary-total"><span>${(booking.priceSnapshot?.isEstimate || booking === bookingDraft && current()?.pricingType === 'minimum') ? 'Стоимость от' : 'Стоимость'}</span><strong>${money(booking.price)}</strong></div></div>`;
   }
   function contactField(name, label, options = '') {
     return `<label for="contact-${name}">${label}</label><input id="contact-${name}" name="${name}" ${options} value="${escape(bookingDraft.client[name])}" aria-invalid="${!!fieldErrors[name]}" aria-describedby="error-${name}"><p class="field-error" id="error-${name}" aria-live="polite">${escape(fieldErrors[name] || '')}</p>`;
@@ -77,9 +77,15 @@
     navigation.classList.toggle('booking-navigation', screen === 'flow');
     document.title = `КРУГ — ${items.find(([id]) => id === active)?.[1] || 'Запись'}`;
   }
-  function bookingCard(booking) {
+  function bookingCard(booking, compact = false) {
     const status = Object.hasOwn(account.statuses, booking.status) ? booking.status : 'request';
-    return `<article class="booking-card"><span class="status ${status}">${account.statuses[status]}</span><h2>${escape(booking.serviceName)}</h2><p>${dateLabel(booking.date)} · ${booking.startTime}–${B.endTime(booking.startTime, booking.durationHours)}</p><div class="summary-line"><span>${hours(booking.durationHours)}</span><strong>${money(booking.price)}</strong></div></article>`;
+    return '<article class="booking-card '+(bookingsTab==='history' && screen==='bookings'?'history-card':'')+'"><div class="booking-date">'+dateLabel(booking.date)+'</div><h2>'+escape(booking.serviceName)+'</h2><p>'+escape(booking.startTime)+'–'+B.endTime(booking.startTime,booking.durationHours)+'</p><span class="status '+status+'">'+account.statuses[status]+'</span>'+(compact?'':'<div class="summary-line"><span>'+hours(booking.durationHours)+'</span><strong>'+(booking.priceSnapshot?.isEstimate?'от ':'')+money(booking.price)+'</strong></div>')+'</article>';
+  }
+  function serviceCopy(service) {
+    const tier=service.priceTiers?.find(t=>t.durationHours >= (service.minDurationHours || 1));
+    const price=service.price ?? tier?.totalPrice;
+    const priceLabel=price == null ? '' : (service.pricingType==='minimum'?'от ':'')+money(price)+(tier?' / '+hours(tier.durationHours):'');
+    return '<strong>'+escape(service.publicName || service.name)+'</strong><small>'+escape(service.publicDescription || service.description || '')+'</small><b>'+priceLabel+'</b>'+(service.minDurationHours?'<small>От '+hours(service.minDurationHours)+'</small>':'');
   }
   function bonusCount(value) { return new Intl.NumberFormat('ru-RU').format(value); }
   async function renderProfile() {
@@ -87,7 +93,21 @@
     const initials = client.name.split(/\s+/).filter(Boolean).slice(0,2).map(part => [...part][0]).join('');
     return `${heading('ТВОЙ КРУГ', 'Профиль')}<section class="profile-identity"><div class="avatar" aria-label="Аватар-заглушка">${escape(initials)}</div><div><h2>${escape(client.name)}</h2><p class="muted">${escape(client.telegram || 'Telegram — Не указан')}</p></div></section><dl class="profile-contacts"><div><dt>Телефон</dt><dd>${escape(client.phone || 'Не указан')}</dd></div></dl><div class="profile-stats"><div><strong>${client.visits}</strong><span>Посещений</span></div><div><strong>${money(client.totalSpent)}</strong><span>Потрачено всего</span></div></div><p class="muted stats-note">По завершённым записям.</p><section class="loyalty-section" aria-labelledby="loyalty-title"><h2 id="loyalty-title">Бонусы · демо</h2><div class="bonus-total"><strong>${bonusCount(loyalty.balance)}</strong><span>бонусов</span></div><p class="muted">1 бонус = ${loyalty.rublesPerBonus} ₽</p><p class="muted">Демонстрационный баланс и история — пример, не связанный с твоими посещениями.</p><h3>История бонусов</h3><ul class="loyalty-history">${history.map(entry => `<li><div><strong>${escape(entry.title)}</strong><small>${dateLabel(entry.date)}</small></div><span class="${entry.amount > 0 ? 'bonus-positive' : ''}">${entry.amount > 0 ? '+' : '−'}${bonusCount(Math.abs(entry.amount))}</span></li>`).join('')}</ul><p class="muted">Начальный баланс: ${bonusCount(loyalty.openingBalance)} бонусов.</p></section>`;
   }
+  let catalogLoaded = false;
   async function render() {
+    const timer = setTimeout(() => {
+      root.setAttribute('aria-busy','true');
+      const loading=document.createElement('div'); loading.className='loading-state'; loading.setAttribute('role','status');
+      loading.textContent=screen==='flow' ? 'Загружаем свободное время…' : 'Загружаем…'; root.append(loading);
+    },120);
+    try {
+      if(!catalogLoaded) {const result=await API.getServices();services=[...result,...result.flatMap(s=>s.packages||[])];catalogLoaded=true;}
+      await renderContent();
+    } catch(error) {
+      root.innerHTML='<div class="screen-content">'+heading('КРУГ',screen==='flow'?'Не удалось загрузить расписание':'Не удалось загрузить данные')+'<p class="muted">Попробуй ещё раз — текущий выбор сохранён.</p>'+button('Попробовать ещё раз','retry','primary')+button('На главную','home','back')+'</div>';
+    } finally {clearTimeout(timer);root.removeAttribute('aria-busy');root.querySelectorAll('.loading-state').forEach(el=>el.remove());}
+  }
+  async function renderContent() {
     const version = ++renderId;
     refreshPrice();
     notice.hidden = true;
@@ -95,24 +115,25 @@
     renderNavigation();
     let html = '';
     if (screen === 'other') {
-      html = button('← Назад', 'home', 'back') + heading('СТУДИЙНЫЕ УСЛУГИ', 'Прочие услуги', 'Выбери, что будем делать в студии') + '<div class="service-list">' + services.filter(s => s.publicVisible && s.publicCategory === 'other' && ['studio-mixing','studio-beatmaking','studio-mix-master'].includes(s.id)).map(s => `<button class="service-card" data-service-quick="${escape(s.id)}"><span class="service-copy"><strong>${escape(s.publicName)}</strong><small>${s.selectDuration ? 'От 2 часов' : hours(s.defaultDurationHours)}</small><b>${s.pricingType === 'minimum' ? 'от ' : ''}${money(s.price)}</b></span></button>`).join('') + '</div>';
+      html = button('← Назад', 'home', 'back') + heading('СТУДИЙНЫЕ УСЛУГИ', 'Прочие услуги', 'Выбери, что будем делать в студии') + '<div class="service-list">' + services.filter(s => s.publicVisible && s.publicCategory === 'other' && ['studio-mixing','studio-beatmaking','studio-mix-master'].includes(s.id)).map(s => '<button class="service-card" data-service-quick="'+escape(s.id)+'"><span class="service-copy">'+serviceCopy(s)+'</span></button>').join('') + '</div>';
     } else if (screen === 'home') {
       const [bookingResult, loyaltyResult] = await Promise.allSettled([API.getMyBookings(), window.KrugLoyalty.getLoyaltyBalance()]);
       const bookings = bookingResult.status === 'fulfilled' ? bookingResult.value : [];
       const loyalty = loyaltyResult.status === 'fulfilled' ? loyaltyResult.value : null;
-      for (const result of [bookingResult, loyaltyResult]) if (result.status === 'rejected') showError(result.reason);
+      const homeError=[bookingResult,loyaltyResult].some(result=>result.status==='rejected');
       if (version !== renderId) return;
       const nearest = account.splitBookings(bookings).upcoming[0];
       html = '<section class="home-hero"><p class="eyebrow">СТУДИЯ КРУГ · ГЛАВНАЯ</p><h1>Всё крутится<br>вокруг <span>музыки.</span></h1></section><div class="home-actions">' + (draftStarted ? button('Продолжить запись <span aria-hidden="true">↗</span>', 'start') : '') + '</div>';
-      html += '<section class="home-services"><h2>Записаться</h2><div class="quick-grid">' + [['recording','Запись','01'],['recording-mix','Запись + сведение','02'],['rental','Аренда','03'],['other','Прочие услуги','04']].map(([id, name, num]) => '<button class="quick-card" data-service-quick="' + escape(id) + '"><span class="card-index">' + num + '<span>↗</span></span><strong>' + escape(name) + '</strong></button>').join('') + '</div></section>';
-      if (nearest) html += '<section class="home-next"><h2>Ближайшая запись</h2>' + bookingCard(nearest) + '</section>';
+      html += '<section class="home-services"><h2>Записаться</h2><div class="quick-grid">' + [['recording','Запись','01'],['recording-mix','Запись + сведение','02'],['rental','Аренда','03'],['other','Прочие услуги','04']].map(([id, name, num]) => '<button class="quick-card" data-service-quick="' + escape(id) + '"><span class="card-index">' + num + '<span>↗</span></span><span class="service-copy">' + (id==='other' ? '<strong>Прочие услуги</strong><small>Сведение, бит и мастеринг в студии</small>' : serviceCopy(services.find(s=>s.id===id) || {name})) + '</span></button>').join('') + '</div></section>';
+      if (homeError) html += '<p class="muted">Не удалось загрузить данные главной.</p>'+button('Попробовать ещё раз','retry','secondary');
+      if (nearest) html += '<section class="home-next"><h2>Ближайшая запись</h2>' + bookingCard(nearest, true) + '</section>';
       html += '<section class="home-bonus" aria-label="Бонусный баланс"><span>Демо-бонусы<strong>' + (loyalty ? bonusCount(loyalty.balance) : '—') + '</strong></span><span>1 бонус = 1 ₽</span></section>';
 
     } else if (screen === 'flow') {
       const labels = steps(), label = labels[step];
       html = `<nav class="flow-nav" aria-label="Навигация записи">${button('← Назад', 'back', 'back')}<span>${step + 1} / ${labels.length} · ${label}</span></nav><div class="progress" aria-label="Шаг ${step + 1} из ${labels.length}">${labels.map((_, i) => `<span class="${i <= step ? 'filled' : ''}"></span>`).join('')}</div>`;
       if (label === 'Формат') {
-        html += heading('АРЕНДА СТУДИИ','Выбери формат аренды') + '<div class="service-list">' + [['rental','Почасовая','Выбрать длительность'],['rental-day','12 часов · День','10:00–22:00 · 9 000 ₽'],['rental-night','12 часов · Ночь','22:00–10:00 следующего дня · 7 500 ₽']].map(([id,name,hint])=>'<button class="service-card" data-rental="'+id+'"><span class="service-copy"><strong>'+name+'</strong><small>'+hint+'</small></span></button>').join('')+'</div>';
+        html += heading('АРЕНДА СТУДИИ','Выбери формат аренды') + '<div class="service-list">' + [['rental','Почасовая','Выбрать длительность'], ...services.filter(s=>s.isRentalPackage).map(s=>[s.id,s.name.replace('Аренда · ',''),s.fixedStart+'–'+B.endTime(s.fixedStart,s.defaultDurationHours)+' · '+money(s.price)])].map(([id,name,hint])=>'<button class="service-card" data-rental="'+id+'"><span class="service-copy"><strong>'+name+'</strong><small>'+hint+'</small></span></button>').join('')+'</div>';
       } else if (label === 'Длительность') {
         html += heading('НЕ ТОРОПИ СВОЙ ЗВУК', 'Сколько времени?', escape(current().name));
         html += `<div class="duration-grid">${Array.from({ length: 8 }, (_, i) => i + 1).filter(n => n >= (current().minDurationHours || 1)).map(n => {
@@ -161,7 +182,7 @@
 
       }
     } else if (screen === 'success') {
-      html = '<div class="success-icon" aria-hidden="true">✓</div>' + heading('ТВОЯ СЛЕДУЮЩАЯ СЕССИЯ', DEMO_MODE ? 'Демо-заявка создана' : 'Заявка отправлена', DEMO_MODE ? '' : 'Студия свяжется с тобой и подтвердит время.') + summary(saved) + '<p class="muted">Заявка доступна в разделе «Мои записи».</p>';
+      html = '<div class="success-icon" aria-hidden="true">✓</div>' + heading('ТВОЯ СЛЕДУЮЩАЯ СЕССИЯ', DEMO_MODE ? 'Демо-заявка создана' : 'Заявка отправлена', DEMO_MODE ? '' : 'Студия свяжется с тобой и подтвердит время.') + summary(saved) + '<p class="status">Ожидает подтверждения</p><div class="success-actions">'+button('Мои записи','success-bookings')+button('На главную','success-home','secondary')+'</div>';
     } else if (screen === 'profile') {
       html = await renderProfile();
     } else {
@@ -169,7 +190,7 @@
       if (version !== renderId) return;
       const bookings = groups[bookingsTab];
       html = heading('ТВОЁ ВРЕМЯ В КРУГЕ', 'Мои записи') + '<p class="muted">Время московское</p><div class="booking-tabs" role="tablist" aria-label="Раздел записей">' + [['upcoming','Ближайшие'],['history','История']].map(([id,label]) => '<button role="tab" id="tab-' + id + '" aria-controls="booking-panel" aria-selected="' + (bookingsTab === id) + '" data-action="list-' + id + '">' + label + ' <span>' + groups[id].length + '</span></button>').join('') + '</div><section id="booking-panel" role="tabpanel" aria-labelledby="tab-' + bookingsTab + '">';
-      html += bookings.length ? '<div class="booking-list">' + bookings.map(bookingCard).join('') + '</div>' : '<div class="empty"><h2>' + (bookingsTab === 'history' ? 'История пока пуста' : 'Время для новой сессии') + '</h2><p class="muted">' + (bookingsTab === 'history' ? 'Здесь появятся прошедшие и отменённые записи.' : 'Открой главную и нажми «Записаться» — найдём удобное время.') + '</p></div>';
+      html += bookings.length ? '<div class="booking-list">' + bookings.map(b=>bookingCard(b)).join('') + '</div>' : '<div class="empty"><h2>' + (bookingsTab === 'history' ? 'История пока пуста' : 'Время для новой сессии') + '</h2><p class="muted">' + (bookingsTab === 'history' ? 'Здесь появятся прошедшие и отменённые записи.' : 'Выбери услугу на главной — найдём удобное время.') + '</p></div>';
       html += '</section>';
     }
 
@@ -182,6 +203,8 @@
   }
   async function navigate(action) {
     if (busy) return;
+    if (action === 'success-bookings') action='bookings';
+    if (action === 'success-home') action='home';
     if (action === 'home') screen = 'home';
     if (action === 'other') screen = 'other';
     if (action === 'bookings') screen = 'bookings';
@@ -274,6 +297,6 @@
     try { await navigate('back'); } catch (error) { showError(error); }
     finally { transitioning = false; }
   });
-  API.getServices().then(result => { services = [...result, ...result.flatMap(s=>s.packages || [])]; return render(); }).catch(showError);
+  render();
 })();
 
