@@ -100,7 +100,7 @@
   function fixHomePrice() {
     const card = root.querySelector('[data-service-quick="recording"]');
     const price = card?.querySelector('.service-copy b');
-    if (price) price.textContent = 'от 1 000 ₽ / час';
+    if (price && price.textContent !== 'от 1 000 ₽ / час') price.textContent = 'от 1 000 ₽ / час';
   }
 
   function cleanProfile() {
@@ -115,10 +115,12 @@
     const upload = root.querySelector('.photo-upload');
     if (avatar?.querySelector('img') && upload) {
       const input = upload.querySelector('input');
-      upload.childNodes.forEach(node => {
-        if (node.nodeType === Node.TEXT_NODE) node.textContent = '';
-      });
-      upload.insertBefore(document.createTextNode('Сменить фото'), input || null);
+      const textNode = [...upload.childNodes].find(node => node.nodeType === Node.TEXT_NODE);
+      if (textNode) {
+        if (textNode.textContent.trim() !== 'Сменить фото') textNode.textContent = 'Сменить фото';
+      } else if (input) {
+        upload.insertBefore(document.createTextNode('Сменить фото'), input);
+      }
     }
   }
 
@@ -171,8 +173,10 @@
     syncHistory();
   }
 
+  // Only observe direct screen swaps. Watching the whole subtree caused our own
+  // visual enhancements to trigger the observer recursively and starve painting.
   const observer = new MutationObserver(() => queueMicrotask(enhance));
-  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-screen'] });
+  observer.observe(root, { childList: true, attributes: true, attributeFilter: ['data-screen'] });
   enhance();
 
   document.addEventListener('click', event => {
