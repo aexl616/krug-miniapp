@@ -22,20 +22,58 @@
   const rawCreateBooking = API.createBooking.bind(API);
 
   const mixMasterRate = 3000;
+  const recordingRegular = {
+    1: 1200,
+    2: 2400,
+    3: 3300,
+    4: 4500,
+    5: 5200,
+    6: 6400,
+    7: 7600,
+    8: 8800
+  };
+  const recordingMorning = {
+    1: 1000,
+    2: 2000,
+    3: 2800,
+    4: 3800,
+    5: 4400,
+    6: 5400,
+    7: 6400,
+    8: 7400
+  };
+
+  const tiersFrom = table => Object.entries(table).map(([durationHours, totalPrice]) => ({
+    durationHours: Number(durationHours),
+    totalPrice
+  }));
+
   function transformService(service) {
-    if (!service || service.id !== 'studio-mix-master') return service;
-    return {
-      ...service,
-      pricingType: 'hourly',
-      price: null,
-      minDurationHours: 2,
-      selectDuration: true,
-      priceTiers: Array.from({ length: 7 }, (_, i) => {
-        const durationHours = i + 2;
-        return { durationHours, totalPrice: durationHours * mixMasterRate };
-      }),
-      publicDescription: 'Сведение и мастеринг в студии · 3 000 ₽/час'
-    };
+    if (!service) return service;
+
+    if (service.id === 'recording') {
+      return {
+        ...service,
+        priceTiers: tiersFrom(recordingRegular)
+      };
+    }
+
+    if (service.id === 'studio-mix-master') {
+      return {
+        ...service,
+        pricingType: 'hourly',
+        price: null,
+        minDurationHours: 2,
+        selectDuration: true,
+        priceTiers: Array.from({ length: 7 }, (_, i) => {
+          const durationHours = i + 2;
+          return { durationHours, totalPrice: durationHours * mixMasterRate };
+        }),
+        publicDescription: 'Сведение и мастеринг в студии · 3 000 ₽/час'
+      };
+    }
+
+    return service;
   }
 
   API.getServices = async () => (await rawGetServices()).map(transformService);
@@ -43,25 +81,72 @@
 
   const rawQuoteFor = B.quoteFor.bind(B);
   B.quoteFor = (service, hours, startTime) => {
-    if (service?.id !== 'studio-mix-master') return rawQuoteFor(service, hours, startTime);
-    const totalPrice = Number(hours) * mixMasterRate;
-    return {
-      totalPrice,
-      pricingPeriod: 'regular',
-      regularPrice: totalPrice,
-      durationHours: Number(hours),
-      startTime: startTime || null,
-      endTime: startTime ? B.endTime(startTime, Number(hours)) : null,
-      version: 3,
-      segments: startTime ? [{
-        startTime,
-        endTime: B.endTime(startTime, Number(hours)),
-        durationHours: Number(hours),
-        hourlyRate: mixMasterRate,
+    const durationHours = Number(hours);
+
+    if (service?.id === 'recording') {
+      const regularPrice = recordingRegular[durationHours];
+      const base = {
+        totalPrice: regularPrice,
+        pricingPeriod: 'regular',
+        regularPrice,
+        durationHours,
+        startTime: startTime || null,
+        endTime: startTime ? B.endTime(startTime, durationHours) : null,
+        version: 3
+      };
+      if (!startTime) return base;
+
+      const start = B.toMinutes(startTime);
+      const end = start + durationHours * 60;
+      const morningStart = 9 * 60;
+      const morningEnd = 15 * 60;
+      const boundaries = [...new Set([start, end, morningStart, morningEnd].filter(value => value >= start && value <= end))].sort((a, b) => a - b);
+      const segments = boundaries.slice(0, -1).map((from, index) => {
+        const to = boundaries[index + 1];
+        const segmentHours = (to - from) / 60;
+        const isMorning = from >= morningStart && to <= morningEnd;
+        const table = isMorning ? recordingMorning : recordingRegular;
+        const totalPrice = table[segmentHours] ?? Math.round(segmentHours * (isMorning ? 1000 : 1200));
+        return {
+          startTime: B.toTime(from),
+          endTime: B.toTime(to),
+          durationHours: segmentHours,
+          hourlyRate: Math.round(totalPrice / segmentHours),
+          totalPrice,
+          pricingPeriod: isMorning ? 'morning' : 'regular'
+        };
+      });
+      const periods = new Set(segments.map(segment => segment.pricingPeriod));
+      return {
+        ...base,
+        totalPrice: segments.reduce((sum, segment) => sum + segment.totalPrice, 0),
+        pricingPeriod: periods.size > 1 ? 'mixed' : segments[0]?.pricingPeriod || 'regular',
+        segments
+      };
+    }
+
+    if (service?.id === 'studio-mix-master') {
+      const totalPrice = durationHours * mixMasterRate;
+      return {
         totalPrice,
-        pricingPeriod: 'regular'
-      }] : undefined
-    };
+        pricingPeriod: 'regular',
+        regularPrice: totalPrice,
+        durationHours,
+        startTime: startTime || null,
+        endTime: startTime ? B.endTime(startTime, durationHours) : null,
+        version: 3,
+        segments: startTime ? [{
+          startTime,
+          endTime: B.endTime(startTime, durationHours),
+          durationHours,
+          hourlyRate: mixMasterRate,
+          totalPrice,
+          pricingPeriod: 'regular'
+        }] : undefined
+      };
+    }
+
+    return rawQuoteFor(service, hours, startTime);
   };
 
   const rawChangeDuration = B.changeDuration.bind(B);
