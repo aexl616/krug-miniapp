@@ -96,13 +96,36 @@ window.KrugData = (() => {
       const fields = B.validateClient(client);
       if (Object.keys(fields).length) throw Object.assign(new Error('Проверь выделенные поля.'), { fields });
       if (!(await getAvailableSlots(data.date, durationHours, service.id)).includes(data.startTime)) throw Object.assign(new Error('Это время уже заняли. Выбери другое время.'), { code: 'SLOT_UNAVAILABLE' });
-      const booking = { id: crypto.randomUUID(), requestId: data.requestId || crypto.randomUUID(), clientId: CLIENT_ID, serviceId: service.id, serviceName: service.name, durationHours, date: data.date, startTime: data.startTime, price, priceSnapshot, client, comment: String(data.comment || '').trim().slice(0, 1000), status: 'request', createdAt: new Date().toISOString() };
+      const bonusQuote=data.useBonuses ? await window.KrugLoyalty.getRedemptionQuote(price,true) : {applied:0,payable:price};
+      const booking = { useBonuses:!!data.useBonuses, bonusSpent:bonusQuote.applied, amountDue:bonusQuote.payable, bonusEarned:0, id: crypto.randomUUID(), requestId: data.requestId || crypto.randomUUID(), clientId: CLIENT_ID, serviceId: service.id, serviceName: service.name, durationHours, date: data.date, startTime: data.startTime, price, priceSnapshot, client, comment: String(data.comment || '').trim().slice(0, 1000), status: 'request', createdAt: new Date().toISOString() };
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...rows, booking])); }
       catch { throw new Error('Не удалось сохранить заявку на устройстве. Попробуй ещё раз.'); }
       return structuredClone(booking);
     };
     return navigator.locks?.request ? navigator.locks.request('krug-mini-booking', save) : save();
   }
+  async function cancelBooking(id) {
+    const update=async()=>{
+      const rows=readBookings(), row=rows.find(b=>b.id===id && b.clientId===CLIENT_ID);
+      if(!row)throw new Error('Запись не найдена.');
+      if(row.status==='cancelled')return structuredClone(row);
+      if(!['request','confirmed'].includes(row.status))throw new Error('Эту запись уже нельзя отменить.');
+      const now=new Date();row.status='cancelled';row.cancelledAt=now.toISOString();
+      row.cancelledAfterStart=now.getTime()>=new Date(row.date+'T'+row.startTime+':00+03:00').getTime();
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(rows));return structuredClone(row);
+    };
+    return navigator.locks?.request ? navigator.locks.request('krug-mini-booking',update) : update();
+  }
+  // Local adapter event for a paid, finished session. No payment UI or real charge.
+  async function completePaidBooking(id){
+    const update=async()=>{const rows=readBookings(),row=rows.find(b=>b.id===id && b.clientId===CLIENT_ID);
+      if(!row)throw new Error('Запись не найдена.');if(row.status==='cancelled')throw new Error('Отменённую запись нельзя завершить.');
+      if(row.paidCompletedAt)return structuredClone(row);
+      const end=new Date(row.date+'T'+row.startTime+':00+03:00').getTime()+row.durationHours*3600000;if(Date.now()<end)throw new Error('Сессия ещё не завершилась.');
+      row.status='completed';row.paymentStatus='paid';row.paidCompletedAt=new Date().toISOString();row.bonusEarned=row.useBonuses?0:Math.floor(row.price*.1);
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(rows));return structuredClone(row);};
+    return navigator.locks?.request?navigator.locks.request('krug-mini-booking',update):update();
+  }
   const getMyBookings = async () => structuredClone(readBookings().filter(b => b.clientId === CLIENT_ID).sort((a, b) => `${b.date}${b.startTime}`.localeCompare(`${a.date}${a.startTime}`)));
-  return { getServices, getService, getAvailability, getAvailableSlots, createBooking, getMyBookings };
+  return { getServices, getService, getAvailability, getAvailableSlots, createBooking, getMyBookings, cancelBooking, completePaidBooking };
 })();

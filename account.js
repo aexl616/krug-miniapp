@@ -4,6 +4,7 @@ window.KrugAccount = (() => {
   function splitBookings(bookings, now = new Date()) {
     const upcoming = [], history = [];
     for (const booking of bookings) {
+      if(booking.status==='cancelled' && (booking.cancelledAfterStart===false || booking.cancelledAt && new Date(booking.cancelledAt)<new Date(booking.date+'T'+booking.startTime+':00+03:00')))continue;
       const end = new Date(`${booking.date}T${booking.startTime}:00+03:00`).getTime() + booking.durationHours * 3600000;
       (booking.status === 'completed' || booking.status === 'cancelled' || end <= now.getTime() ? history : upcoming).push(booking);
     }

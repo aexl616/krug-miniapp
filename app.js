@@ -5,7 +5,7 @@
   const account = window.KrugAccount;
   const navigation = document.getElementById('main-navigation');
   const DEMO_MODE = window.KrugConfig.DEMO_MODE;
-  document.getElementById('demo-indicator').hidden = !DEMO_MODE;
+  document.getElementById('demo-indicator').hidden = true;
   const syncViewport = () => document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height || window.innerHeight}px`);
   syncViewport();
   window.visualViewport?.addEventListener('resize', syncViewport);
@@ -29,7 +29,8 @@
     draftStarted = true;
     dateLimit = 8; flowMessage = ''; fieldErrors = {};
     const user = TG.getTelegramUser();
-    if (user) bookingDraft.client = { name: [user.first_name, user.last_name].filter(Boolean).join(' '), phone: '', telegram: user.username ? `@${user.username}` : '' };
+    if (knownClient?.onboarded) bookingDraft.client={name:knownClient.name,phone:knownClient.phone,telegram:knownClient.telegram || ''};
+    else if (user) bookingDraft.client = { name: [user.first_name, user.last_name].filter(Boolean).join(' '), phone: '', telegram: user.username ? `@${user.username}` : '' };
   }
   function selectService(id) {
     const service = services.find(s => s.id === id);
@@ -56,7 +57,7 @@
     return `<div class="muted">${snapshot.segments.map(segment => `<div>${segment.startTime}–${segment.endTime} · ${segment.durationHours} ч × ${money(segment.hourlyRate)} = ${money(segment.totalPrice)}</div>`).join('')}</div>`;
   }
   function summary(booking, serviceName) {
-    return `<div class="summary"><strong>${escape(serviceName || booking.serviceName)}</strong><div class="session-date">${dateLabel(booking.date)}</div><div class="session-time">${booking.startTime}–${B.endTime(booking.startTime, booking.durationHours)} <small>МСК</small></div><p class="muted">${hours(booking.durationHours)}</p>${priceBreakdown(booking) ? '<details class="price-details"><summary>Как рассчитана стоимость</summary>'+priceBreakdown(booking)+'</details>' : ''}<div class="summary-total"><span>${(booking.priceSnapshot?.isEstimate || booking === bookingDraft && current()?.pricingType === 'minimum') ? 'Стоимость от' : 'Стоимость'}</span><strong>${money(booking.price)}</strong></div></div>`;
+    return `<div class="summary"><strong>${escape(serviceName || booking.serviceName)}</strong><div class="session-date">${dateLabel(booking.date)}</div><div class="session-time">${booking.startTime}–${B.endTime(booking.startTime, booking.durationHours)} <small>МСК</small></div><p class="muted">${hours(booking.durationHours)}</p>${priceBreakdown(booking) ? '<details class="price-details"><summary>Как рассчитана стоимость</summary>'+priceBreakdown(booking)+'</details>' : ''}<div class="summary-total"><span>${(booking.priceSnapshot?.isEstimate || booking === bookingDraft && current()?.pricingType === 'minimum') ? 'Стоимость от' : 'Стоимость'}</span><strong>${money(booking.price)}</strong></div>${booking.bonusSpent ? '<p class="muted">Списано бонусов: '+bonusCount(booking.bonusSpent)+'</p><div class="bonus-payable"><span>К оплате</span><strong>'+money(booking.amountDue)+'</strong></div>' : ''}</div>`;
   }
   function contactField(name, label, options = '') {
     return `<label for="contact-${name}">${label}</label><input id="contact-${name}" name="${name}" ${options} value="${escape(bookingDraft.client[name])}" aria-invalid="${!!fieldErrors[name]}" aria-describedby="error-${name}"><p class="field-error" id="error-${name}" aria-live="polite">${escape(fieldErrors[name] || '')}</p>`;
@@ -71,15 +72,18 @@
   }
   function renderNavigation() {
     const active = screen === 'success' ? 'bookings' : screen === 'other' ? 'home' : screen;
-    const items = [['home', 'Главная', '⌂'], ['flow', 'Записаться', '+'], ['bookings', 'Мои записи', '≡'], ['profile', 'Профиль', '○']];
+    const svg = path => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+path+'</svg>';
+    const items = [['home', 'Главная', svg('<path d="m4 10 8-6 8 6v10H4z"/><path d="M9 20v-7h6v7"/>')], ['flow', 'Записаться', ''], ['bookings', 'Мои записи', svg('<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M8 3v4m8-4v4M4 10h16m-11 4h2m2 0h2"/>')], ['profile', 'Профиль', svg('<circle cx="12" cy="8" r="3.5"/><path d="M5 20v-2a7 7 0 0 1 14 0v2"/>')]];
     // Booking starts or resumes from the primary action on Home.
     navigation.innerHTML = items.filter(([id]) => id !== 'flow').map(([id, label, icon]) => `<button type="button" data-action="${id === 'flow' ? 'resume' : id}" ${active === id ? 'aria-current="page"' : ''}><span aria-hidden="true">${icon}</span>${label}</button>`).join('');
     navigation.classList.toggle('booking-navigation', screen === 'flow');
+    root.dataset.screen = screen;
+    root.dataset.confirmation = String(screen === 'flow' && steps()[step] === 'Подтверждение');
     document.title = `КРУГ — ${items.find(([id]) => id === active)?.[1] || 'Запись'}`;
   }
   function bookingCard(booking, compact = false) {
     const status = Object.hasOwn(account.statuses, booking.status) ? booking.status : 'request';
-    return '<article class="booking-card '+(bookingsTab==='history' && screen==='bookings'?'history-card':'')+'"><div class="booking-date">'+dateLabel(booking.date)+'</div><h2>'+escape(booking.serviceName)+'</h2><p>'+escape(booking.startTime)+'–'+B.endTime(booking.startTime,booking.durationHours)+'</p><span class="status '+status+'">'+account.statuses[status]+'</span>'+(compact?'':'<div class="summary-line"><span>'+hours(booking.durationHours)+'</span><strong>'+(booking.priceSnapshot?.isEstimate?'от ':'')+money(booking.price)+'</strong></div>')+'</article>';
+    return '<article class="booking-card '+(bookingsTab==='history' && screen==='bookings'?'history-card':'')+'"><div class="booking-date">'+dateLabel(booking.date)+'</div><h2>'+escape(booking.serviceName)+'</h2><p>'+escape(booking.startTime)+'–'+B.endTime(booking.startTime,booking.durationHours)+'</p><span class="status '+status+'">'+account.statuses[status]+'</span>'+(compact?'':'<div class="summary-line"><span>'+hours(booking.durationHours)+'</span><strong>'+(booking.priceSnapshot?.isEstimate?'от ':'')+money(booking.price)+'</strong></div>')+(!compact && ['request','confirmed'].includes(booking.status)?'<button class="cancel-booking" data-cancel="'+escape(booking.id)+'">Отменить запись</button>':'')+'</article>';
   }
   function serviceCopy(service) {
     const tier=service.priceTiers?.find(t=>t.durationHours >= (service.minDurationHours || 1));
@@ -89,10 +93,45 @@
   }
   function bonusCount(value) { return new Intl.NumberFormat('ru-RU').format(value); }
   async function renderProfile() {
-    const [client, loyalty, history] = await Promise.all([window.KrugClient.getCurrentClient(), window.KrugLoyalty.getLoyaltyBalance(), window.KrugLoyalty.getLoyaltyHistory()]);
+    const [client, loyalty] = await Promise.all([window.KrugClient.getCurrentClient(), window.KrugLoyalty.getLoyaltyBalance()]);
     const initials = client.name.split(/\s+/).filter(Boolean).slice(0,2).map(part => [...part][0]).join('');
-    return `${heading('ТВОЙ КРУГ', 'Профиль')}<section class="profile-identity"><div class="avatar" aria-label="Аватар-заглушка">${escape(initials)}</div><div><h2>${escape(client.name)}</h2><p class="muted">${escape(client.telegram || 'Telegram — Не указан')}</p></div></section><dl class="profile-contacts"><div><dt>Телефон</dt><dd>${escape(client.phone || 'Не указан')}</dd></div></dl><div class="profile-stats"><div><strong>${client.visits}</strong><span>Посещений</span></div><div><strong>${money(client.totalSpent)}</strong><span>Потрачено всего</span></div></div><p class="muted stats-note">По завершённым записям.</p><section class="loyalty-section" aria-labelledby="loyalty-title"><h2 id="loyalty-title">Бонусы · демо</h2><div class="bonus-total"><strong>${bonusCount(loyalty.balance)}</strong><span>бонусов</span></div><p class="muted">1 бонус = ${loyalty.rublesPerBonus} ₽</p><p class="muted">Демонстрационный баланс и история — пример, не связанный с твоими посещениями.</p><h3>История бонусов</h3><ul class="loyalty-history">${history.map(entry => `<li><div><strong>${escape(entry.title)}</strong><small>${dateLabel(entry.date)}</small></div><span class="${entry.amount > 0 ? 'bonus-positive' : ''}">${entry.amount > 0 ? '+' : '−'}${bonusCount(Math.abs(entry.amount))}</span></li>`).join('')}</ul><p class="muted">Начальный баланс: ${bonusCount(loyalty.openingBalance)} бонусов.</p></section>`;
+    return `${heading('ТВОЙ КРУГ', 'Профиль')}<section class="profile-identity"><div class="avatar" aria-label="Аватар-заглушка">${avatarMarkup(client,initials)}</div><div><h2>${escape(client.name)}</h2><p class="muted">${escape(client.telegram || 'Telegram — Не указан')}</p><p class="profile-phone">${escape(client.phone || 'Телефон не указан')}</p></div></section><div class="profile-actions">${button('Редактировать','edit-profile','secondary')}<label class="photo-upload">Добавить фото<input type="file" accept="image/jpeg,image/png,image/webp" id="profile-photo"></label></div><p id="photo-message" class="muted" role="status"></p><div class="profile-stats"><div><strong>${client.visits}</strong><span>Посещений</span></div><div><strong>${money(client.totalSpent)}</strong><span>Потрачено всего</span></div></div><p class="muted stats-note">По завершённым записям.</p><section class="loyalty-section" aria-labelledby="loyalty-title"><h2 id="loyalty-title">Бонусный баланс</h2><div class="bonus-total"><strong>${bonusCount(loyalty.balance)}</strong><span>бонусов</span></div><p class="muted">1 бонус = ${loyalty.rublesPerBonus} ₽</p><p class="muted">Демо-баланс. Списания, возвраты и начисления сохраняются на этом устройстве.</p><button class="loyalty-open" data-action="loyalty">История бонусов <span aria-hidden="true">↗</span></button></section>`;
   }
+  const loyaltyDialog=document.createElement('dialog');
+  loyaltyDialog.className='loyalty-dialog'; loyaltyDialog.setAttribute('aria-labelledby','loyalty-dialog-title');document.body.append(loyaltyDialog);
+  let loyaltyFocus=null;
+  loyaltyDialog.addEventListener('close',()=>loyaltyFocus?.focus({preventScroll:true}));
+  loyaltyDialog.addEventListener('click',event=>{event.stopPropagation();if(event.target===loyaltyDialog || event.target.closest('[data-close]'))loyaltyDialog.close();if(event.target.closest('[data-retry-loyalty]'))loadLoyalty();});
+  async function loadLoyalty(){
+    loyaltyDialog.innerHTML='<div class="dialog-header"><h2 id="loyalty-dialog-title">История бонусов</h2><button data-close aria-label="Закрыть">×</button></div><div class="dialog-scroll" role="status">Загружаем историю…</div>';
+    try {
+      const [balance,history]=await Promise.all([window.KrugLoyalty.getLoyaltyBalance(),window.KrugLoyalty.getLoyaltyHistory()]);
+      if(!loyaltyDialog.open)return;
+      loyaltyDialog.querySelector('.dialog-scroll').innerHTML='<p class="dialog-balance">'+bonusCount(balance.balance)+' <small>демо-бонусов</small></p><p class="muted">Демонстрационная история · 1 бонус = 1 ₽</p><ul class="loyalty-history">'+history.map(e=>'<li><div><strong>'+escape(e.title)+'</strong><small>'+dateLabel(e.date)+'</small></div><span>'+(e.amount>0?'+':'−')+bonusCount(Math.abs(e.amount))+'</span></li>').join('')+'</ul>'+(history.length?'':'<p>История пока пуста</p>');
+    }catch(error){if(loyaltyDialog.open)loyaltyDialog.querySelector('.dialog-scroll').innerHTML='<p>Не удалось загрузить историю</p><button class="primary" data-retry-loyalty>Попробовать ещё раз</button>';}
+  }
+  function openLoyalty(){loyaltyFocus=document.activeElement;loyaltyDialog.showModal();loadLoyalty();}
+  function avatarMarkup(client,initials){return safePhoto(client.avatarUrl) ? '<img class="profile-photo" src="'+escape(client.avatarUrl)+'" alt="Фото профиля">' : escape(initials);}
+  function safePhoto(url){return /^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/i.test(url || '');}
+  let knownClient=null;
+  const welcome=document.createElement('dialog');welcome.className='loyalty-dialog welcome-dialog';welcome.setAttribute('aria-labelledby','welcome-title');document.body.append(welcome);
+  welcome.addEventListener('cancel',event=>{if(!knownClient?.onboarded)event.preventDefault();});
+  welcome.addEventListener('click',event=>{event.stopPropagation();if(event.target.closest('[data-close-profile]'))welcome.close();});
+  async function welcomeIfNeeded(force=false){
+    knownClient=await window.KrugClient.getCurrentClient();if(knownClient.onboarded && !force)return;
+    welcome.innerHTML='<form id="welcome-form"><h2 id="welcome-title">Добро пожаловать в КРУГ</h2><p class="muted">Как к тебе обращаться и куда позвонить для подтверждения записи?</p><label for="welcome-name">Имя</label><input id="welcome-name" name="name" autocomplete="given-name" required maxlength="80" value="'+escape(knownClient.name==='Демо-профиль'?'':knownClient.name)+'"><label for="welcome-phone">Телефон</label><input id="welcome-phone" name="phone" type="tel" autocomplete="tel" required maxlength="40" value="'+escape(knownClient.phone)+'"><p class="welcome-error" role="alert"></p><button class="primary" type="submit">Продолжить</button></form>';if(force && knownClient.onboarded){welcome.querySelector('h2').textContent='Редактировать профиль';welcome.querySelector('.muted').textContent='Имя и телефон для связи со студией.';welcome.querySelector('[type=submit]').textContent='Сохранить';welcome.querySelector('form').insertAdjacentHTML('beforeend','<button type="button" class="back" data-close-profile>Отмена</button>');}welcome.showModal();
+  }
+  welcome.addEventListener('submit',async event=>{event.preventDefault();const button=welcome.querySelector('button');button.disabled=true;try{knownClient=await window.KrugClient.saveCurrentClient({name:welcome.querySelector('[name=name]').value.trim(),phone:welcome.querySelector('[name=phone]').value.trim()});if(draftStarted)bookingDraft.client={name:knownClient.name,phone:knownClient.phone,telegram:knownClient.telegram || ''};welcome.close();await render();}catch(e){welcome.querySelector('.welcome-error').textContent=e.message;}finally{button.disabled=false;}});
+  root.addEventListener('change',async event=>{
+    if(event.target.id==='use-bonuses'){bookingDraft.useBonuses=event.target.checked;await render();root.querySelector('#use-bonuses')?.focus({preventScroll:true});return;}
+    if(event.target.id!=='profile-photo')return;const file=event.target.files[0];if(!file)return;
+    const message=root.querySelector('#photo-message');
+    try{
+      if(!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size>8*1024*1024)throw new Error('Выбери JPG, PNG или WebP до 8 МБ.');
+      message.textContent='Сохраняем фото…';const bitmap=await createImageBitmap(file);const canvas=document.createElement('canvas');const scale=Math.min(1,512/Math.max(bitmap.width,bitmap.height));canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+      knownClient=await window.KrugClient.saveCurrentClient({avatarUrl:canvas.toDataURL('image/jpeg',.85)});await render();
+    }catch(e){message.textContent=e.message || 'Не удалось сохранить фото.';}
+  });
   let catalogLoaded = false;
   async function render() {
     const timer = setTimeout(() => {
@@ -117,17 +156,23 @@
     if (screen === 'other') {
       html = button('← Назад', 'home', 'back') + heading('СТУДИЙНЫЕ УСЛУГИ', 'Прочие услуги', 'Выбери, что будем делать в студии') + '<div class="service-list">' + services.filter(s => s.publicVisible && s.publicCategory === 'other' && ['studio-mixing','studio-beatmaking','studio-mix-master'].includes(s.id)).map(s => '<button class="service-card" data-service-quick="'+escape(s.id)+'"><span class="service-copy">'+serviceCopy(s)+'</span></button>').join('') + '</div>';
     } else if (screen === 'home') {
-      const [bookingResult, loyaltyResult] = await Promise.allSettled([API.getMyBookings(), window.KrugLoyalty.getLoyaltyBalance()]);
+      const [bookingResult, loyaltyResult, clientResult] = await Promise.allSettled([API.getMyBookings(), window.KrugLoyalty.getLoyaltyBalance(), window.KrugClient.getCurrentClient()]);
       const bookings = bookingResult.status === 'fulfilled' ? bookingResult.value : [];
       const loyalty = loyaltyResult.status === 'fulfilled' ? loyaltyResult.value : null;
-      const homeError=[bookingResult,loyaltyResult].some(result=>result.status==='rejected');
+      const client = clientResult.status === 'fulfilled' ? clientResult.value : null;
+      const homeError=[bookingResult,loyaltyResult,clientResult].some(result=>result.status==='rejected');
       if (version !== renderId) return;
       const nearest = account.splitBookings(bookings).upcoming[0];
-      html = '<section class="home-hero"><p class="eyebrow">СТУДИЯ КРУГ · ГЛАВНАЯ</p><h1>Всё крутится<br>вокруг <span>музыки.</span></h1></section><div class="home-actions">' + (draftStarted ? button('Продолжить запись <span aria-hidden="true">↗</span>', 'start') : '') + '</div>';
-      html += '<section class="home-services"><h2>Записаться</h2><div class="quick-grid">' + [['recording','Запись','01'],['recording-mix','Запись + сведение','02'],['rental','Аренда','03'],['other','Прочие услуги','04']].map(([id, name, num]) => '<button class="quick-card" data-service-quick="' + escape(id) + '"><span class="card-index">' + num + '<span>↗</span></span><span class="service-copy">' + (id==='other' ? '<strong>Прочие услуги</strong><small>Сведение, бит и мастеринг в студии</small>' : serviceCopy(services.find(s=>s.id===id) || {name})) + '</span></button>').join('') + '</div></section>';
+      const nickname = client?.telegram || client?.name || 'Профиль';
+      const initials = (client?.name || 'К').split(/\s+/).slice(0,2).map(part=>[...part][0]).join('');
+      const photo = safePhoto(client?.avatarUrl) ? '<img src="'+escape(client.avatarUrl)+'" alt="" referrerpolicy="no-referrer">' : '';
+      html = '<div class="home-userbar"><div class="home-user"><span class="home-user-avatar">'+escape(initials)+photo+'</span><strong>'+escape(nickname)+'</strong></div><button class="home-bonus" data-action="loyalty" aria-label="Бонусы — открыть историю"><strong>'+(loyalty ? bonusCount(loyalty.balance) : '—')+'</strong><small>Демо-бонусы ↗</small></button></div>';
+      html += '<section class="home-hero"><p class="eyebrow">СТУДИЯ КРУГ · ГЛАВНАЯ</p><h1>Записаться</h1></section>';
+      html += '<section class="home-services" aria-label="Выбор услуги"><div class="quick-grid">' + [['recording','Запись','01'],['recording-mix','Запись + сведение','02'],['rental','Аренда','03'],['other','Прочие услуги','04']].map(([id, name, num]) => '<button class="quick-card" data-service-quick="' + escape(id) + '"><span class="card-index">' + num + '<span>↗</span></span><span class="service-copy">' + (id==='other' ? '<strong>Прочие услуги</strong><small>Сведение, бит и мастеринг в студии</small>' : serviceCopy(services.find(s=>s.id===id) || {name})) + '</span></button>').join('') + '</div></section>';
+      if(draftStarted) html += '<div class="home-actions">'+button('Продолжить запись <span aria-hidden="true">↗</span>','start')+'</div>';
       if (homeError) html += '<p class="muted">Не удалось загрузить данные главной.</p>'+button('Попробовать ещё раз','retry','secondary');
-      if (nearest) html += '<section class="home-next"><h2>Ближайшая запись</h2>' + bookingCard(nearest, true) + '</section>';
-      html += '<section class="home-bonus" aria-label="Бонусный баланс"><span>Демо-бонусы<strong>' + (loyalty ? bonusCount(loyalty.balance) : '—') + '</strong></span><span>1 бонус = 1 ₽</span></section>';
+      if (nearest) html += '<button class="home-next home-shortcut" data-action="nearest"><span><small>Ближайшая запись</small><strong>'+dateLabel(nearest.date)+' · '+escape(nearest.startTime)+'</strong><small>'+escape(nearest.serviceName)+' · '+escape(account.statuses[nearest.status] || account.statuses.request)+'</small></span><span aria-hidden="true">↗</span></button>';
+
 
     } else if (screen === 'flow') {
       const labels = steps(), label = labels[step];
@@ -170,15 +215,9 @@
       } else {
         html += heading('ПОЧТИ В КРУГЕ', 'Всё верно?');
         html += summary(bookingDraft, current().name);
-        const telegramUser = TG.getTelegramUser();
-        const telegramName = telegramUser ? [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' ') : '';
-        const telegramContact = telegramUser ? '<div class="telegram-contact"><strong>Свяжемся с тобой в Telegram</strong><span>' + escape(telegramName) + (telegramUser.username ? ' · ' + escape('@' + telegramUser.username) : '') + '</span></div>' : '';
-        html += '<form id="booking-form" novalidate><h2>Как с тобой связаться</h2>' + telegramContact;
-        html += contactField('name', 'Как тебя зовут?', 'autocomplete="name" maxlength="80" required placeholder="Твоё имя"');
-        html += contactField('phone', 'Телефон', 'type="tel" autocomplete="tel" maxlength="40" required placeholder="+7 999 123-45-67"');
-        if (!TG.isTelegram()) html += contactField('telegram', 'Telegram · необязательно', 'autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="33" placeholder="@your_name"');
-        html += '<p class="muted">' + (telegramUser ? 'Телефон — для связи, если в Telegram не получится.' : 'Укажи телефон, чтобы студия могла связаться с тобой и подтвердить заявку.') + '</p>';
-        html += '<label for="comment">Комментарий <span class="muted">· необязательно</span></label><textarea id="comment" name="comment" rows="3" maxlength="1000" placeholder="Расскажи, что будем записывать">' + escape(bookingDraft.comment) + '</textarea></form><div class="dock"><button form="booking-form" type="submit" class="primary" ' + (busy ? 'disabled' : '') + '>' + (busy ? 'Сохраняем…' : 'Отправить заявку <span aria-hidden="true">↗</span>') + '</button></div>';
+        const redemption=await window.KrugLoyalty.getRedemptionQuote(bookingDraft.price,bookingDraft.useBonuses);
+        html += '<div class="bonus-choice"><label class="bonus-switch" for="use-bonuses"><span><strong>Списать бонусы</strong><small>Доступно '+bonusCount(redemption.balance)+'</small></span><input type="checkbox" role="switch" id="use-bonuses" '+(bookingDraft.useBonuses?'checked':'')+'><span class="switch-track" aria-hidden="true"></span></label><p class="muted">'+(bookingDraft.useBonuses?'Спишется '+bonusCount(redemption.applied)+' · останется '+bonusCount(redemption.remaining):'После оплаченной сессии начислим 10% бонусами')+'</p><div class="bonus-payable"><span>К оплате</span><strong>'+money(redemption.payable)+'</strong></div></div><form id="booking-form" novalidate>';
+        html += '<label for="comment">Комментарий <span class="muted">· необязательно</span></label><textarea id="comment" name="comment" rows="2" maxlength="1000" placeholder="Расскажи, что будем записывать">' + escape(bookingDraft.comment) + '</textarea></form><div class="dock"><button form="booking-form" type="submit" class="primary" ' + (busy ? 'disabled' : '') + '>' + (busy ? 'Сохраняем…' : 'Отправить заявку <span aria-hidden="true">↗</span>') + '</button></div>';
 
       }
     } else if (screen === 'success') {
@@ -208,7 +247,10 @@
     if (action === 'home') screen = 'home';
     if (action === 'other') screen = 'other';
     if (action === 'bookings') screen = 'bookings';
+    if (action === 'loyalty') { openLoyalty(); return; }
+    if (action === 'edit-profile') { await welcomeIfNeeded(true); return; }
     if (action === 'profile') screen = 'profile';
+    if (action === 'nearest') { screen='bookings'; bookingsTab='upcoming'; }
     if (action === 'start') { if (!draftStarted) { resetDraft(); step = 0; } screen = 'flow'; }
     if (action === 'list-upcoming' || action === 'list-history') bookingsTab = action === 'list-upcoming' ? 'upcoming' : 'history';
     if (action === 'more-dates') dateLimit += 8;
@@ -223,6 +265,7 @@
     await render();
     if (action === 'more-dates') return;
     root.querySelector('.screen-content').scrollTop = 0;
+
     root.focus({ preventScroll: true });
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
@@ -231,6 +274,7 @@
     if (!target || target.disabled || busy || transitioning || target.type === 'submit' && target.form) return;
     transitioning = true;
     try {
+      if(target.dataset.cancel){if(!window.confirm('Отменить запись?'))return;await API.cancelBooking(target.dataset.cancel);await render();return;}
       if (target.dataset.action) return await navigate(target.dataset.action);
       if (target.dataset.rental) {
         selectService(target.dataset.rental); bookingDraft.date=null; bookingDraft.startTime=null; step=1;
@@ -262,6 +306,7 @@
     } catch (error) { showError(error); }
     finally { transitioning = false; }
   });
+  root.addEventListener('error', event => { if (event.target.matches('.home-user-avatar img')) event.target.remove(); }, true);
   root.addEventListener('input', event => {
     const { name, value } = event.target;
     if (name === 'comment') bookingDraft.comment = value;
@@ -275,7 +320,7 @@
     notice.hidden = true;
     const errors = B.validateClient(bookingDraft.client);
     displayFieldErrors(errors);
-    if (Object.keys(errors).length) { document.getElementById(`contact-${Object.keys(errors)[0]}`)?.focus(); return; }
+    if (Object.keys(errors).length) { await welcomeIfNeeded(true); return; }
     busy = true;
     const submit = root.querySelector('[type="submit"]');
     submit.disabled = true; submit.textContent = 'Сохраняем…';
@@ -297,6 +342,6 @@
     try { await navigate('back'); } catch (error) { showError(error); }
     finally { transitioning = false; }
   });
-  render();
+  render().then(welcomeIfNeeded).catch(showError);
 })();
 

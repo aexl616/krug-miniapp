@@ -203,3 +203,27 @@ test('demo horizon has multiple full rental dates while saved conflicts stay enf
  assert.equal((await API.getAvailableSlots(date,12,'rental-day')).length,0);
  assert.equal((await API.getService('morning')).legacyOnly,true);
 });
+
+test('cancellation before start is hidden, after start stays in history and releases occupancy',async()=>{
+ const {API,B,storage,context}=setup();vm.runInContext(fs.readFileSync(path.join(__dirname,'..','account.js'),'utf8'),context);
+ const make=(id,date)=>({id,clientId:'krug-mock-client',date,startTime:'09:00',durationHours:2,status:'request'});
+ storage.set('krug_mini_app_bookings_v1',JSON.stringify([make('future',B.addDays(B.today(),1)),make('past',B.addDays(B.today(),-1))]));
+ const future=await API.cancelBooking('future');assert.equal(future.cancelledAfterStart,false);
+ const past=await API.cancelBooking('past');assert.equal(past.cancelledAfterStart,true);
+ const groups=context.window.KrugAccount.splitBookings(await API.getMyBookings());assert.equal(groups.upcoming.length,0);assert.deepEqual(Array.from(groups.history,b=>b.id),['past']);
+ assert.equal((await API.cancelBooking('future')).cancelledAt,future.cancelledAt);
+});
+
+test('loyalty redemption, capped remainder, payment accrual, refunds and idempotency',async()=>{
+ const {API,B,storage,context}=setup();vm.runInContext(fs.readFileSync(path.join(__dirname,'..','loyalty.js'),'utf8'),context);const L=context.window.KrugLoyalty;
+ let date=B.addDays(B.today(),1);while(!(await API.getAvailableSlots(date,1,'recording')).length)date=B.addDays(date,1);
+ const draft={serviceId:'recording',durationHours:1,date,startTime:(await API.getAvailableSlots(date,1,'recording'))[0],useBonuses:true,requestId:'redeem',client:{name:'Тест',phone:'79991234567'}};
+ const row=await API.createBooking(draft);assert.equal(row.bonusSpent,740);assert.equal(row.amountDue,row.price-740);assert.equal((await L.getLoyaltyBalance()).balance,0);
+ assert.equal((await API.createBooking(draft)).id,row.id);assert.equal((await L.getLoyaltyBalance()).balance,0);
+ await API.cancelBooking(row.id);assert.equal((await L.getLoyaltyBalance()).balance,740);
+ let rows=JSON.parse(storage.get('krug_mini_app_bookings_v1'));rows.push({id:'paid',clientId:'krug-mock-client',serviceName:'Запись',date:B.addDays(B.today(),-1),startTime:'09:00',durationHours:1,price:10000,status:'confirmed',useBonuses:false});storage.set('krug_mini_app_bookings_v1',JSON.stringify(rows));
+ await API.completePaidBooking('paid');await API.completePaidBooking('paid');assert.equal((await L.getLoyaltyBalance()).balance,1740);
+ const quote=await L.getRedemptionQuote(1000,true);assert.equal(quote.applied,1000);assert.equal(quote.payable,0);assert.equal(quote.remaining,740);
+ rows=JSON.parse(storage.get('krug_mini_app_bookings_v1'));rows.push({id:'late',clientId:'krug-mock-client',serviceName:'Запись',date:B.addDays(B.today(),-1),createdAt:B.addDays(B.today(),-2),startTime:'09:00',durationHours:1,price:1200,status:'request',bonusSpent:200,useBonuses:true});storage.set('krug_mini_app_bookings_v1',JSON.stringify(rows));
+ await API.cancelBooking('late');assert.equal((await L.getLoyaltyBalance()).balance,1540);
+});

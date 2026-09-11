@@ -18,6 +18,8 @@ const server = http.createServer((req, res) => {
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const browser = await chromium.launch({ headless: true, channel: 'msedge' });
+  const newContext=browser.newContext.bind(browser);
+  browser.newContext=async options=>{const context=await newContext(options);await context.addInitScript(()=>{if(!localStorage.getItem('krug_mini_client_v1'))localStorage.setItem('krug_mini_client_v1',JSON.stringify({onboarded:true,name:'Демо-профиль',phone:'79991234567'}));});return context;};
   const url = `http://127.0.0.1:${server.address().port}/`;
   try {
     for (const [width, height] of [[390,844],[360,800],[430,932]]) {
@@ -27,6 +29,7 @@ const server = http.createServer((req, res) => {
       page.on('pageerror', e => errors.push(e.message));
       page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
       const check = async name => {
+        await page.waitForTimeout(220);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: overflow on ${name}`);
         assert.ok(await page.evaluate(() => {
           const content = document.querySelector('.screen-content')?.getBoundingClientRect();
@@ -39,6 +42,7 @@ const server = http.createServer((req, res) => {
       await page.goto(url);
       await page.locator('[data-service-quick="recording"]').waitFor();
       await check('home');
+      assert.ok(await page.locator('.screen-content').evaluate(el=>el.scrollHeight<=el.clientHeight+1),'Home must fit without scrolling');
       await page.locator('[data-service-quick="recording"]').click();
       await check('service');
       await page.locator('[data-duration="3"]').click();
@@ -54,15 +58,17 @@ const server = http.createServer((req, res) => {
       const selectedTime = await page.locator('[data-time][aria-pressed="true"]').getAttribute('data-time');
       await check('time');
       await page.locator('[data-action="next"]').click();
-      await page.getByLabel('Как тебя зовут?').fill('Тест Клиент');
-      await page.getByLabel('Телефон').fill('+7 999 123-45-67');
-      await page.getByLabel('Telegram · необязательно', { exact: true }).fill('@test_client');
       await page.getByLabel('Комментарий').fill('Тестовая сессия');
       await page.locator('[data-action="back"]').click();
       assert.equal(await page.locator('[data-time][aria-pressed="true"]').getAttribute('data-time'), selectedTime);
       await page.locator('[data-action="next"]').click();
-      assert.equal(await page.getByLabel('Как тебя зовут?').inputValue(), 'Тест Клиент');
+      assert.equal(await page.locator('#booking-form input').count(),0);
+      assert.equal(await page.getByLabel('Комментарий').inputValue(),'Тестовая сессия');
+      await page.locator('#use-bonuses').check();
+      await page.waitForFunction(()=>document.querySelector('#use-bonuses')?.checked);
+      assert.match(await page.locator('.bonus-choice').innerText(),/Спишется 740/);
       await check('confirmation');
+      assert.ok(await page.locator('.screen-content').evaluate(el=>el.scrollHeight<=el.clientHeight+1),'Confirmation must fit');
       await page.getByRole('button', { name: 'Отправить заявку' }).click();
       await page.getByRole('heading', { name: 'Демо-заявка создана' }).waitFor();
       await check('success');
@@ -73,11 +79,27 @@ const server = http.createServer((req, res) => {
       await page.locator('[data-action="bookings"]').click();
       assert.equal(await page.locator('.booking-card').count(), 1);
       const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem('krug_mini_app_bookings_v1')));
+      assert.equal(persisted[0].bonusSpent,740);
+      assert.equal(persisted[0].amountDue,persisted[0].price-740);
+      assert.equal(persisted[0].client.phone,'79991234567');
       assert.equal(persisted[0].date, selectedDate);
       assert.equal(persisted[0].price, 3600 - Math.max(0, Math.min(15, Number(selectedTime.slice(0, 2)) + 3) - Math.max(9, Number(selectedTime.slice(0, 2)))) * 200);
       assert.equal(persisted[0].priceSnapshot.totalPrice, persisted[0].price);
       // Verify another service cannot occupy this same studio interval.
       assert.equal(await page.evaluate(async ({ date, time }) => (await KrugData.getAvailableSlots(date, 1, 'rental')).includes(time), { date: selectedDate, time: selectedTime }), false);
+      await page.locator('.brand').click();
+      await page.locator('[data-action="nearest"]').waitFor();
+      assert.ok(await page.locator('.screen-content').evaluate(el=>el.scrollHeight<=el.clientHeight+1));
+      await page.locator('[data-action="nearest"]').click();
+      await page.locator('.booking-card').waitFor();
+      await page.locator('.brand').click();
+      await page.locator('[data-service-quick="recording"]').click();
+      await page.locator('.brand').click();
+      assert.ok(await page.locator('.screen-content').evaluate(el=>el.scrollHeight<=el.clientHeight+1),'Home with draft and next booking must fit');
+      await page.locator('[data-action="loyalty"]').click();
+      await page.locator('.loyalty-dialog .loyalty-history').waitFor();
+      assert.equal(await page.locator('.loyalty-dialog:not(.welcome-dialog)').evaluate(el=>el.open),true);
+      await page.getByRole('button',{name:'Закрыть',exact:true}).click();
       assert.deepEqual(errors, []);
       console.log(`PASS ${width}×${height}: 8 screens, back, contacts, submit, reload, shared occupancy, no overflow/errors`);
       await context.close();
@@ -171,24 +193,15 @@ const server = http.createServer((req, res) => {
     assert.equal(await edge.locator('[data-time][aria-pressed="true"]').count(), 0);
     await edge.locator('[data-time]').first().click();
     await edge.locator('[data-action="next"]').click();
-    await edge.getByRole('button', { name: 'Отправить заявку' }).click();
-    assert.equal(await edge.locator('#contact-name').getAttribute('aria-invalid'), 'true');
-    assert.equal(await edge.locator('#contact-phone').getAttribute('aria-invalid'), 'true');
-    assert.equal(await edge.locator('#contact-telegram').getAttribute('aria-invalid'), 'false');
-    await edge.locator('#contact-name').fill('Анна');
-    await edge.locator('#contact-phone').fill('123');
-    await edge.getByRole('button', { name: 'Отправить заявку' }).click();
-    assert.equal(await edge.locator('#contact-name').inputValue(), 'Анна');
-    assert.match(await edge.locator('#error-phone').innerText(), /Введи телефон/);
+    assert.equal(await edge.locator('#booking-form input').count(),0);
     await edge.setViewportSize({ width: 360, height: 450 });
-    await edge.locator('#contact-phone').fill('8 (999) 123-45-67');
     const submitBox = await edge.getByRole('button', { name: 'Отправить заявку' }).boundingBox();
     assert.ok(submitBox.y + submitBox.height <= 450);
     await edge.screenshot({ path: path.join(output, 'krug-mini-keyboard-height.png') });
     await edge.getByRole('button', { name: 'Отправить заявку' }).click();
     await edge.getByRole('heading', { name: 'Демо-заявка создана' }).waitFor();
     await edge.locator('[data-action="bookings"]').click();
-    assert.equal(await edge.locator('.booking-card button').count(), 0);
+    assert.ok(await edge.locator('.booking-card [data-cancel]').count()>0);
     await edgeContext.close();
     console.log('PASS back-flow, duration/date revalidation, service reset, date expansion, inline validation, optional Telegram, 450px viewport');
     // Fixed service is a test fixture only, not an invented public catalog item.
@@ -226,9 +239,6 @@ const server = http.createServer((req, res) => {
       await tgPage.locator('[data-time]').first().click();
       await tgPage.locator('[data-action="next"]').click();
       assert.equal(await tgPage.locator('#contact-telegram').count(), 0);
-      assert.match(await tgPage.locator('.telegram-contact').innerText(), /Свяжемся с тобой в Telegram/);
-      assert.equal(await tgPage.locator('#contact-name').inputValue(), 'Анна');
-      await tgPage.locator('#contact-phone').fill('+7 999 123-45-67');
       await tgPage.getByRole('button', { name: 'Отправить заявку' }).click();
       await tgPage.getByRole('heading', { name: username ? 'Демо-заявка создана' : 'Заявка отправлена' }).waitFor();
       if (!username) assert.equal(await tgPage.locator('#demo-indicator').isVisible(), false);
@@ -240,16 +250,21 @@ const server = http.createServer((req, res) => {
       const p = await ctx.newPage();
       await p.goto(url);
       await p.locator('.home-bonus strong').waitFor();
+      assert.equal(await p.locator('#main-navigation svg').count(),3);
       assert.equal(await p.locator('.home-bonus strong').innerText(), '740');
       await p.locator('#main-navigation [data-action="profile"]').click();
       await p.locator('.profile-identity').waitFor();
       assert.match(await p.locator('.profile-identity').innerText(), /Демо-профиль/);
       assert.equal(await p.locator('.bonus-total strong').innerText(), '740');
-      assert.equal(await p.locator('.loyalty-history li').count(), 3);
-      assert.match(await p.locator('.loyalty-history').innerText(), /−500/);
+      assert.equal(await p.locator('.loyalty-section .loyalty-history').count(), 0);
+      await p.locator('.loyalty-open').click();
+      await p.locator('.loyalty-dialog .loyalty-history li').first().waitFor();
+      assert.equal(await p.locator('.loyalty-dialog .loyalty-history li').count(),3);
+      await p.getByRole('button',{name:'Закрыть',exact:true}).click();
       assert.equal(await p.locator('#main-navigation [aria-current="page"]').getAttribute('data-action'), 'profile');
+      assert.ok(await p.locator('.screen-content').evaluate(el=>el.scrollHeight<=el.clientHeight+1),'Profile must fit');
       await p.screenshot({path:path.join(output,'krug-account-'+width+'.png')});
-      await p.locator('.loyalty-history li').last().scrollIntoViewIfNeeded();
+      await p.locator('.loyalty-open').scrollIntoViewIfNeeded();
       assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       assert.ok(await p.evaluate(() => {
         const nav=document.querySelector('#main-navigation').getBoundingClientRect();
@@ -345,7 +360,6 @@ const server = http.createServer((req, res) => {
         assert.equal((await p.locator('.summary-total strong').innerText()).replace(/\D/g,''),kind==='night'?'7500':'9000');
         assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
         assert.ok(await p.evaluate(()=>document.querySelector('.screen-content').getBoundingClientRect().bottom<=document.querySelector('.dock').getBoundingClientRect().top+1));
-        await p.locator('#contact-name').fill('Тест');await p.locator('#contact-phone').fill('79991234567');
         await p.getByRole('button',{name:'Отправить заявку'}).click();
         await p.getByRole('heading',{name:'Демо-заявка создана'}).waitFor();
         const saved=await p.evaluate(()=>JSON.parse(localStorage.getItem('krug_mini_app_bookings_v1'))[0]);
@@ -375,7 +389,6 @@ const server = http.createServer((req, res) => {
     await statePage.locator('[data-action="next"]').click();
     await statePage.locator('[data-time]').first().click();
     await statePage.locator('[data-action="next"]').click();
-    await statePage.locator('#contact-name').fill('Тест');await statePage.locator('#contact-phone').fill('79991234567');
     await statePage.getByRole('button',{name:'Отправить заявку'}).click();
     await statePage.getByText('Ожидает подтверждения',{exact:true}).waitFor();
     await statePage.locator('[data-action="success-bookings"]').click();await statePage.locator('.booking-card').waitFor();
@@ -390,5 +403,29 @@ const server = http.createServer((req, res) => {
       await p.screenshot({path:path.join(output,'krug-long-services-'+width+'.png')});await ctx.close();
     }
     console.log('PASS long service names and 12000 price at all mobile widths');
+
+    const fresh=await newContext({viewport:{width:360,height:800}}), welcomePage=await fresh.newPage();
+    await welcomePage.addInitScript(()=>{window.Telegram={WebApp:{initDataUnsafe:{user:{id:123456,first_name:'Анна',username:'anna'}}}};});
+    await welcomePage.goto(url);await welcomePage.locator('#welcome-name').waitFor();
+    assert.equal(await welcomePage.locator('#welcome-name').inputValue(),'Анна');
+    await welcomePage.locator('#welcome-phone').fill('+7 999 123-45-67');await welcomePage.locator('#welcome-form button').click();
+    await welcomePage.waitForFunction(()=>!document.querySelector('.welcome-dialog').open);
+    assert.equal(await welcomePage.evaluate(()=>JSON.parse(localStorage.getItem('krug_mini_client_v1')).telegramUserId),123456);
+    await welcomePage.reload();await welcomePage.locator('.home-userbar').waitFor();assert.equal(await welcomePage.locator('.welcome-dialog').evaluate(d=>d.open),false);
+    await welcomePage.locator('#main-navigation [data-action="profile"]').click();
+    await welcomePage.locator('[data-action="edit-profile"]').click();
+    await welcomePage.locator('#welcome-name').fill('Анна Новая');
+    await welcomePage.locator('#welcome-phone').fill('79998887766');
+    await welcomePage.getByRole('button',{name:'Сохранить',exact:true}).click();
+    await welcomePage.waitForFunction(()=>!document.querySelector('.welcome-dialog').open);
+    assert.equal(await welcomePage.locator('.profile-phone').innerText(),'79998887766');
+    assert.equal(await welcomePage.evaluate(()=>JSON.parse(localStorage.getItem('krug_mini_client_v1')).name),'Анна Новая');
+    const avatar=await welcomePage.screenshot();await welcomePage.locator('#profile-photo').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:avatar});
+    await welcomePage.locator('.profile-photo').waitFor();
+    assert.match(await welcomePage.evaluate(()=>JSON.parse(localStorage.getItem('krug_mini_client_v1')).avatarUrl),/^data:image\/jpeg/);
+    await welcomePage.evaluate(()=>localStorage.setItem('krug_mini_app_bookings_v1',JSON.stringify([{id:'cancel-me',clientId:'krug-mock-client',date:KrugBooking.addDays(KrugBooking.today(),1),startTime:'12:00',durationHours:2,status:'request',serviceName:'Запись',price:2000}])));
+    await welcomePage.locator('#main-navigation [data-action="bookings"]').click();welcomePage.once('dialog',d=>d.accept());await welcomePage.locator('[data-cancel]').click();
+    await welcomePage.getByText('Время для новой сессии',{exact:true}).waitFor();await welcomePage.locator('[data-action="list-history"]').click();await welcomePage.getByText('История пока пуста',{exact:true}).waitFor();
+    await fresh.close();console.log('PASS first visit, Telegram ID, profile persistence, photo upload and cancellation');
   } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });

@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 function setup(bookings = [], user = null) {
   const window = { KrugData: { getMyBookings: async () => structuredClone(bookings) }, KrugTelegram: { getTelegramUser: () => user } };
-  const context = vm.createContext({ window, Date, Intl, crypto: require('node:crypto').webcrypto });
+  const localStorage={getItem:()=>null,setItem:()=>{}};
+  const context = vm.createContext({ window, localStorage, Date, Intl, crypto: require('node:crypto').webcrypto });
   for (const file of ['booking.js','client.js','loyalty.js','account.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'..',file),'utf8'),context);
   return window;
 }
@@ -48,7 +49,7 @@ test('loyalty ledger reconciles and reads cannot mutate it', async () => {
   history[0].amount = 10000; balance.balance = 0;
   assert.equal((await loyalty.getLoyaltyBalance()).balance,740);
   assert.equal((await loyalty.getLoyaltyHistory())[0].amount,-500);
-  assert.deepEqual(Object.keys(loyalty).sort(),['getLoyaltyBalance','getLoyaltyHistory']);
+  assert.deepEqual(Object.keys(loyalty).sort(),['getLoyaltyBalance','getLoyaltyHistory','getRedemptionQuote']);
 });
 test('upcoming/history grouping handles ongoing, expired, cancelled, completed and Moscow time', () => {
   const {KrugAccount: account} = setup();
